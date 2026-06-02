@@ -1,4 +1,5 @@
 ## Codex
+- Flashed the ESP32 firmware with retrying, as-needed NTAG NDEF readback diagnostics.
 - Added retrying, as-needed NTAG NDEF readback diagnostics so write verification reports the failing page or parser condition.
 - Flashed the ESP32 firmware with page-by-page NTAG NDEF writing and retrying readback verification.
 - Reworked ESP32 NTAG writing to emit the DPI NDEF URI page-by-page and retry readback verification after card reselection.
