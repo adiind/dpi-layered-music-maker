@@ -2,10 +2,11 @@ import type { LayerId } from "../types/music";
 import type { InputListener, LayerInputAdapter, ResolveNextOption } from "./InputAdapter";
 
 const KEY_TO_LAYER: Record<string, LayerId> = {
-  "1": "rhythm",
-  "2": "harmony",
-  "3": "bass",
-  "4": "melody",
+  "1": "foundation",
+  "2": "texture",
+  "3": "drums",
+  "4": "keys",
+  "5": "solo",
 };
 
 export class KeyboardNfcMockAdapter implements LayerInputAdapter {

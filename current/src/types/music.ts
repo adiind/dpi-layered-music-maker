@@ -1,17 +1,16 @@
-export type LayerId = "rhythm" | "harmony" | "bass" | "melody";
+export type LayerId = "foundation" | "texture" | "drums" | "keys" | "solo";
 
 export type InputSource = "keyboard" | "card" | "hardware";
+export type LayerVisualKind = "wave" | "particles" | "beats" | "chords" | "melody";
 
 export interface LayerOption {
   id: string;
   name: string;
   tone: string;
-}
-
-export interface LayerMixProfile {
-  gain: number;
-  filterFrequency: number;
-  activity: number;
+  fileName: string;
+  url: string;
+  defaultGain: number;
+  visualKind?: LayerVisualKind;
 }
 
 export interface LayerDefinition {
@@ -20,6 +19,9 @@ export interface LayerDefinition {
   order: number;
   accent: string;
   accentSoft: string;
+  icon: string;
+  tone: string;
+  visualKind: LayerVisualKind;
   options: LayerOption[];
 }
 
@@ -27,14 +29,21 @@ export type SelectionState = Record<LayerId, string>;
 export type VolumeState = Record<LayerId, number>;
 export type MuteState = Record<LayerId, boolean>;
 export type PendingSelectionState = Partial<Record<LayerId, string>>;
+export type LayerLevelState = Record<LayerId, number>;
+
+export interface EngineStatus {
+  state: "idle" | "loading" | "ready" | "error";
+  loadedCount: number;
+  totalCount: number;
+  message?: string;
+}
 
 export interface EngineTick {
-  step: number;
-  bar: number;
-  beat: number;
+  progress: number;
+  elapsedSeconds: number;
+  durationSeconds: number;
   activeLayers: LayerId[];
-  isDownbeat: boolean;
-  loopSteps?: number;
+  layerLevels: LayerLevelState;
 }
 
 export interface LayerInputEvent {

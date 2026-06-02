@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ComposedMusicEngine } from "./audio/ComposedMusicEngine";
+import { StemMusicEngine } from "./audio/StemMusicEngine";
 import { CompositionView } from "./components/CompositionView";
 import { LayerColumn } from "./components/LayerColumn";
 import { NfcMockPanel } from "./components/NfcMockPanel";
@@ -9,59 +9,65 @@ import {
   DEFAULT_MUTES,
   DEFAULT_SELECTIONS,
   DEFAULT_VOLUMES,
-  TOTAL_STEPS,
+  DEMO_DURATION_LABEL,
+  DEMO_DURATION_SECONDS,
   getLayer,
   getLayerOption,
   getNextLayerOptionId,
   LAYER_DEFINITIONS,
+  LAYER_ORDER,
+  TOTAL_AUDIO_FILES,
 } from "./data/layers";
-import { HardwareInputAdapter, isWebSerialNfcSupported } from "./input/HardwareInputAdapter";
-import type { InputConnectionStatus } from "./input/InputAdapter";
 import { KeyboardNfcMockAdapter } from "./input/MockNfcAdapter";
 import type {
   ChangeNotice,
+  EngineStatus,
   EngineTick,
   LayerInputEvent,
   LayerId,
+  LayerLevelState,
   MuteState,
-  PendingSelectionState,
   SelectionState,
   VolumeState,
 } from "./types/music";
 
+const createEmptyLayerLevels = () =>
+  LAYER_ORDER.reduce((levels, layerId) => ({ ...levels, [layerId]: 0 }), {} as LayerLevelState);
+
 const INITIAL_TICK: EngineTick = {
-  step: 0,
-  bar: 0,
-  beat: 0,
+  progress: 0,
+  elapsedSeconds: 0,
+  durationSeconds: DEMO_DURATION_SECONDS,
   activeLayers: [],
-  isDownbeat: true,
-  loopSteps: TOTAL_STEPS,
+  layerLevels: createEmptyLayerLevels(),
 };
 
-const randomIndex = (length: number) => Math.floor(Math.random() * length);
+const INITIAL_ENGINE_STATUS: EngineStatus = {
+  state: "idle",
+  loadedCount: 0,
+  totalCount: TOTAL_AUDIO_FILES,
+};
 
-const chooseDifferentOptionId = (layerId: LayerId, currentOptionId: string) => {
-  const layer = getLayer(layerId);
-  const choices = layer?.options.filter((option) => option.id !== currentOptionId) ?? [];
-  return choices[randomIndex(choices.length)]?.id ?? currentOptionId;
+const formatTime = (seconds: number) => {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
 };
 
 const App = () => {
-  const engineRef = useRef<ComposedMusicEngine | null>(null);
-  const hardwareAdapterRef = useRef<HardwareInputAdapter | null>(null);
+  const engineRef = useRef<StemMusicEngine | null>(null);
   const handleInputRef = useRef<(event: LayerInputEvent) => void>(() => undefined);
   const selectionsRef = useRef<SelectionState>({ ...DEFAULT_SELECTIONS });
-  const mutesRef = useRef<MuteState>({ ...DEFAULT_MUTES });
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAudioStarting, setIsAudioStarting] = useState(false);
+  const [espConnected, setEspConnected] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<EngineStatus>(INITIAL_ENGINE_STATUS);
   const [selections, setSelections] = useState<SelectionState>({ ...DEFAULT_SELECTIONS });
-  const [pendingSelections, setPendingSelections] = useState<PendingSelectionState>({});
   const [volumes, setVolumes] = useState<VolumeState>({ ...DEFAULT_VOLUMES });
   const [mutes, setMutes] = useState<MuteState>({ ...DEFAULT_MUTES });
   const [tick, setTick] = useState<EngineTick>(INITIAL_TICK);
-  const [hardwareStatus, setHardwareStatus] = useState<InputConnectionStatus>({ state: "idle" });
-  const [hardwareSupported] = useState(() => isWebSerialNfcSupported());
   const [lastInputLabel, setLastInputLabel] = useState("No input yet");
   const [changeNotice, setChangeNotice] = useState<ChangeNotice | null>(null);
   const [recentLayerId, setRecentLayerId] = useState<LayerId | null>(null);
@@ -71,18 +77,15 @@ const App = () => {
   }, [selections]);
 
   useEffect(() => {
-    mutesRef.current = mutes;
-  }, [mutes]);
-
-  useEffect(() => {
-    const engine = new ComposedMusicEngine();
+    const engine = new StemMusicEngine();
     engine.setTickListener(setTick);
+    engine.setStatusListener(setEngineStatus);
     engine.setCommitListener((nextSelections) => {
       selectionsRef.current = nextSelections;
       setSelections(nextSelections);
-      setPendingSelections({});
     });
     engineRef.current = engine;
+    void engine.prepare();
 
     return () => {
       if (changeClearRef.current) {
@@ -98,61 +101,45 @@ const App = () => {
     [],
   );
 
-  const handleSelect = useCallback(
-    (layerId: LayerId, optionId: string) => {
-      engineRef.current?.setSelection(layerId, optionId);
-
-      if (isPlaying) {
-        setPendingSelections((current) => ({ ...current, [layerId]: optionId }));
-        return;
-      }
-
-      selectionsRef.current = { ...selectionsRef.current, [layerId]: optionId };
-      setSelections((current) => ({ ...current, [layerId]: optionId }));
-    },
-    [isPlaying],
-  );
+  const handleSelect = useCallback((layerId: LayerId, optionId: string) => {
+    engineRef.current?.setSelection(layerId, optionId);
+    selectionsRef.current = { ...selectionsRef.current, [layerId]: optionId };
+    setSelections((current) => ({ ...current, [layerId]: optionId }));
+  }, []);
 
   const handleInputEvent = useCallback(
     (event: LayerInputEvent) => {
-      let nextLayerId = event.layerId;
       let nextOptionId = event.optionId;
 
-      if (event.source === "hardware") {
-        const audibleLayers = LAYER_DEFINITIONS.filter((layer) => !mutesRef.current[layer.id]);
-        const layers = audibleLayers.length > 0 ? audibleLayers : LAYER_DEFINITIONS;
-        const layer = layers[randomIndex(layers.length)];
-        nextLayerId = layer.id;
-        nextOptionId = chooseDifferentOptionId(layer.id, selectionsRef.current[layer.id]);
-      } else if (nextOptionId === selectionsRef.current[nextLayerId]) {
-        nextOptionId = getNextLayerOptionId(nextLayerId, selectionsRef.current[nextLayerId]);
+      if (nextOptionId === selectionsRef.current[event.layerId]) {
+        nextOptionId = getNextLayerOptionId(event.layerId, selectionsRef.current[event.layerId]);
       }
 
-      const layerName = getLayer(nextLayerId)?.name ?? nextLayerId;
+      const layerName = getLayer(event.layerId)?.name ?? event.layerId;
       const previousOptionName =
-        getLayerOption(nextLayerId, selectionsRef.current[nextLayerId])?.name ?? selectionsRef.current[nextLayerId];
-      const optionName = getLayerOption(nextLayerId, nextOptionId)?.name ?? nextOptionId;
+        getLayerOption(event.layerId, selectionsRef.current[event.layerId])?.name ?? selectionsRef.current[event.layerId];
+      const optionName = getLayerOption(event.layerId, nextOptionId)?.name ?? nextOptionId;
       const sourceName =
-        event.source === "hardware" ? "NFC tag" : event.source === "keyboard" ? "Key" : "Mock card";
+        event.source === "hardware" ? "ESP32" : event.source === "keyboard" ? "Key" : "Mock tag";
 
-      setLastInputLabel(`${sourceName}: ${layerName} ${previousOptionName} -> ${optionName}`);
+      setLastInputLabel(`${sourceName}: ${layerName} ${previousOptionName} to ${optionName}`);
       setChangeNotice({
-        layerId: nextLayerId,
+        layerId: event.layerId,
         source: event.source,
         sourceLabel: sourceName,
         layerName,
         previousOptionName,
         nextOptionName: optionName,
-        timingLabel: isPlaying ? "queued next bar" : "changed now",
+        timingLabel: isPlaying ? "switched in sync" : "changed now",
       });
-      setRecentLayerId(nextLayerId);
+      setRecentLayerId(event.layerId);
 
       if (changeClearRef.current) {
         clearTimeout(changeClearRef.current);
       }
       changeClearRef.current = setTimeout(() => setRecentLayerId(null), 2200);
 
-      handleSelect(nextLayerId, nextOptionId);
+      handleSelect(event.layerId, nextOptionId);
     },
     [handleSelect, isPlaying],
   );
@@ -162,18 +149,9 @@ const App = () => {
   }, [handleInputEvent]);
 
   useEffect(() => {
-    const adapter = new HardwareInputAdapter();
-    hardwareAdapterRef.current = adapter;
-    const cleanupInput = adapter.connect((event) => handleInputRef.current(event));
-    const cleanupStatus = adapter.onStatusChange(setHardwareStatus);
-
-    return () => {
-      cleanupInput();
-      cleanupStatus();
-      void adapter.disconnect();
-      hardwareAdapterRef.current = null;
-    };
-  }, []);
+    const adapter = new KeyboardNfcMockAdapter(resolveNextOption);
+    return adapter.connect((event) => handleInputRef.current(event));
+  }, [resolveNextOption]);
 
   const handleMockTap = useCallback(
     (layerId: LayerId) => {
@@ -186,19 +164,6 @@ const App = () => {
     [handleInputEvent, resolveNextOption],
   );
 
-  const handleConnectHardware = useCallback(() => {
-    void hardwareAdapterRef.current?.requestAndConnect();
-  }, []);
-
-  const handleDisconnectHardware = useCallback(() => {
-    void hardwareAdapterRef.current?.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const adapter = new KeyboardNfcMockAdapter(resolveNextOption);
-    return adapter.connect(handleInputEvent);
-  }, [handleInputEvent, resolveNextOption]);
-
   const handleTogglePlayback = async () => {
     const engine = engineRef.current;
     if (!engine || isAudioStarting) return;
@@ -206,7 +171,6 @@ const App = () => {
     if (isPlaying) {
       engine.stop();
       setIsPlaying(false);
-      setPendingSelections({});
       return;
     }
 
@@ -226,12 +190,7 @@ const App = () => {
   const handleRandomize = () => {
     const nextSelections = createRandomSelection();
     engineRef.current?.setSelections(nextSelections);
-
-    if (isPlaying) {
-      setPendingSelections(nextSelections);
-      return;
-    }
-
+    selectionsRef.current = nextSelections;
     setSelections(nextSelections);
   };
 
@@ -255,51 +214,52 @@ const App = () => {
           key={layer.id}
           layer={layer}
           selectedOptionId={selections[layer.id]}
-          pendingOptionId={pendingSelections[layer.id]}
           muted={mutes[layer.id]}
           volume={volumes[layer.id]}
           active={tick.activeLayers.includes(layer.id)}
           recent={recentLayerId === layer.id}
+          level={tick.layerLevels[layer.id]}
           onSelect={handleSelect}
           onToggleMute={handleToggleMute}
           onVolume={handleVolume}
         />
       )),
-    [handleSelect, mutes, pendingSelections, recentLayerId, selections, tick.activeLayers, volumes],
+    [handleSelect, mutes, recentLayerId, selections, tick.activeLayers, tick.layerLevels, volumes],
   );
 
   return (
-    <main className="min-h-screen text-[#202124]">
+    <main className="demo-app">
       <TopBar
         isPlaying={isPlaying}
         isAudioStarting={isAudioStarting}
+        engineStatus={engineStatus}
+        elapsedLabel={formatTime(tick.elapsedSeconds)}
+        espConnected={espConnected}
         onTogglePlayback={handleTogglePlayback}
         onRandomize={handleRandomize}
+        onToggleEsp={() => setEspConnected((current) => !current)}
       />
 
-      <div className="mx-auto flex w-full max-w-[1520px] flex-col gap-5 px-4 py-5 md:px-8">
-        <div className="grid gap-5 lg:grid-cols-[0.95fr_0.95fr_1.15fr_0.95fr_0.95fr]">
-          {layerColumns.slice(0, 2)}
-          <CompositionView
-            selections={selections}
-            mutedLayers={mutes}
-            activeLayers={tick.activeLayers}
-            step={tick.step}
-            loopSteps={tick.loopSteps ?? TOTAL_STEPS}
-            changeNotice={changeNotice}
-          />
-          {layerColumns.slice(2)}
-        </div>
-
-        <NfcMockPanel
-          onTap={handleMockTap}
-          hardwareStatus={hardwareStatus}
-          hardwareSupported={hardwareSupported}
-          lastInputLabel={lastInputLabel}
-          onConnectHardware={handleConnectHardware}
-          onDisconnectHardware={handleDisconnectHardware}
+      <div className="demo-workspace">
+        <div className="channel-bank">{layerColumns}</div>
+        <CompositionView
+          selections={selections}
+          mutedLayers={mutes}
+          activeLayers={tick.activeLayers}
+          layerLevels={tick.layerLevels}
+          progress={tick.progress}
+          elapsedLabel={formatTime(tick.elapsedSeconds)}
+          durationLabel={DEMO_DURATION_LABEL}
+          changeNotice={changeNotice}
         />
       </div>
+
+      <NfcMockPanel
+        onTap={handleMockTap}
+        volumes={volumes}
+        espConnected={espConnected}
+        lastInputLabel={lastInputLabel}
+      />
     </main>
   );
 };

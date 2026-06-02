@@ -14,6 +14,12 @@ export const StopIcon = ({ className = "h-4 w-4" }: IconProps) => (
   </svg>
 );
 
+export const PauseIcon = ({ className = "h-4 w-4" }: IconProps) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z" fill="currentColor" />
+  </svg>
+);
+
 export const ShuffleIcon = ({ className = "h-4 w-4" }: IconProps) => (
   <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
     <path
@@ -32,5 +38,23 @@ export const VolumeIcon = ({ className = "h-4 w-4" }: IconProps) => (
 export const MutedIcon = ({ className = "h-4 w-4" }: IconProps) => (
   <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
     <path d="M4 9.2v5.6h3.4l4.4 3.5V5.7L7.4 9.2H4Zm11.3.4 1.7 1.7 1.7-1.7 1.1 1.1-1.7 1.7 1.7 1.7-1.1 1.1-1.7-1.7-1.7 1.7-1.1-1.1 1.7-1.7-1.7-1.7 1.1-1.1Z" fill="currentColor" />
+  </svg>
+);
+
+export const CableIcon = ({ className = "h-4 w-4" }: IconProps) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M7 4h2v5H7V4Zm8 0h2v5h-2V4Zm-3 11.8V19h3v2H9v-2h3v-3.2A6 6 0 0 1 6 9.8V8h12v1.8a6 6 0 0 1-6 6Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const TagIcon = ({ className = "h-4 w-4" }: IconProps) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M5 4h8.2L20 10.8V20H5V4Zm2 2v12h11v-6.8L12.8 6H7Zm2.4 3.2a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z"
+      fill="currentColor"
+    />
   </svg>
 );

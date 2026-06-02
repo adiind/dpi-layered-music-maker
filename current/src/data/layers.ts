@@ -1,94 +1,224 @@
 import type {
   LayerDefinition,
   LayerId,
-  LayerMixProfile,
   MuteState,
   SelectionState,
   VolumeState,
 } from "../types/music";
 
-export const BPM = 120;
-export const KEY_NAME = "C / Am";
-export const LOOP_LENGTH = "4 bars";
-export const TOTAL_STEPS = 64;
-export const STEPS_PER_BAR = 16;
+export const DEMO_DURATION_SECONDS = 96;
+export const DEMO_DURATION_LABEL = "01:36";
+export const SOURCE_LABEL = "DPI Music stems";
+export const AUDIO_PATH = "/audio/dpi";
 
 export const LAYER_DEFINITIONS: LayerDefinition[] = [
   {
-    id: "rhythm",
-    name: "Rhythm",
+    id: "foundation",
+    name: "Foundation",
     order: 1,
-    accent: "#ff7b6f",
-    accentSoft: "rgba(255, 123, 111, 0.18)",
+    accent: "#009da3",
+    accentSoft: "rgba(0, 157, 163, 0.15)",
+    icon: "bass",
+    tone: "low body and harmonic weight",
+    visualKind: "wave",
     options: [
-      { id: "soft-kit", name: "Soft Kit", tone: "warm kick, brushed snare, steady hats" },
-      { id: "broken-snap", name: "Broken Snap", tone: "syncopated kick and dry rim hits" },
-      { id: "pulse-drive", name: "Pulse Drive", tone: "four-on-floor pulse with open hats" },
-      { id: "half-time", name: "Half Time", tone: "wide slow backbeat with small clicks" },
+      {
+        id: "bass-guitar",
+        name: "Bass Guitar",
+        tone: "clean plucked low line",
+        fileName: "1-bass-guitar.mp3",
+        url: `${AUDIO_PATH}/1-bass-guitar.mp3`,
+        defaultGain: 0.88,
+      },
+      {
+        id: "bass-guitar-b",
+        name: "Bass Guitar B",
+        tone: "alternate bass movement",
+        fileName: "1-bass-guitar-b.mp3",
+        url: `${AUDIO_PATH}/1-bass-guitar-b.mp3`,
+        defaultGain: 0.84,
+      },
+      {
+        id: "bouncy-synth-chords",
+        name: "Bouncy Synth Chords",
+        tone: "wide bouncing chord foundation",
+        fileName: "1-bouncy-synth-chords.mp3",
+        url: `${AUDIO_PATH}/1-bouncy-synth-chords.mp3`,
+        defaultGain: 0.74,
+      },
     ],
   },
   {
-    id: "harmony",
-    name: "Harmony",
+    id: "texture",
+    name: "Texture",
     order: 2,
-    accent: "#ffc65f",
-    accentSoft: "rgba(255, 198, 95, 0.18)",
+    accent: "#8c4bd8",
+    accentSoft: "rgba(140, 75, 216, 0.15)",
+    icon: "texture",
+    tone: "air, shimmer, and motion",
+    visualKind: "particles",
     options: [
-      { id: "felt-piano", name: "Felt Piano", tone: "soft voiced chords with real movement" },
-      { id: "tape-keys", name: "Tape Keys", tone: "rounded arpeggio through the progression" },
-      { id: "warm-pad", name: "Warm Pad", tone: "slow sustained harmony bed" },
-      { id: "glass-chimes", name: "Glass Chimes", tone: "delicate high chord tones" },
+      {
+        id: "synth-wavey",
+        name: "Synth Wavey",
+        tone: "moving synth wash",
+        fileName: "2-synth-wavey.mp3",
+        url: `${AUDIO_PATH}/2-synth-wavey.mp3`,
+        defaultGain: 0.74,
+      },
+      {
+        id: "brushed-snare",
+        name: "Brushed Snare",
+        tone: "soft scraped rhythmic texture",
+        fileName: "2-brushed-snare.mp3",
+        url: `${AUDIO_PATH}/2-brushed-snare.mp3`,
+        defaultGain: 0.7,
+      },
+      {
+        id: "ethereal-echo-thing",
+        name: "Ethereal Echo Thing",
+        tone: "floating echoed accents",
+        fileName: "2-ethereal-echo-thing.mp3",
+        url: `${AUDIO_PATH}/2-ethereal-echo-thing.mp3`,
+        defaultGain: 0.76,
+      },
     ],
   },
   {
-    id: "bass",
-    name: "Bass",
+    id: "drums",
+    name: "Drums",
     order: 3,
-    accent: "#7bd9ae",
-    accentSoft: "rgba(123, 217, 174, 0.18)",
+    accent: "#ff4f26",
+    accentSoft: "rgba(255, 79, 38, 0.15)",
+    icon: "drums",
+    tone: "beat blocks and transients",
+    visualKind: "beats",
     options: [
-      { id: "round-root", name: "Round Root", tone: "punchier roots with a small pickup" },
-      { id: "soft-sub", name: "Soft Sub", tone: "deeper sub with audible attack pulses" },
-      { id: "bass-guitar", name: "Bass Guitar", tone: "plucked moving bass line" },
-      { id: "drive-bass", name: "Drive Bass", tone: "syncopated mid-forward bass" },
+      {
+        id: "drum-simple",
+        name: "Drum Simple",
+        tone: "steady central pulse",
+        fileName: "3-drum-simple.mp3",
+        url: `${AUDIO_PATH}/3-drum-simple.mp3`,
+        defaultGain: 0.82,
+      },
+      {
+        id: "drum-poom-tss",
+        name: "Drum Poom Tss",
+        tone: "kick and bright hat answer",
+        fileName: "3-drum-poom-tss.mp3",
+        url: `${AUDIO_PATH}/3-drum-poom-tss.mp3`,
+        defaultGain: 0.8,
+      },
+      {
+        id: "drum-w-duck",
+        name: "Drum w Duck",
+        tone: "ducking groove movement",
+        fileName: "3-drum-w-duck.mp3",
+        url: `${AUDIO_PATH}/3-drum-w-duck.mp3`,
+        defaultGain: 0.78,
+      },
     ],
   },
   {
-    id: "melody",
-    name: "Melody",
+    id: "keys",
+    name: "Keys",
     order: 4,
-    accent: "#79b8ff",
-    accentSoft: "rgba(121, 184, 255, 0.18)",
+    accent: "#d9a000",
+    accentSoft: "rgba(217, 160, 0, 0.16)",
+    icon: "keys",
+    tone: "piano blocks and chord color",
+    visualKind: "chords",
     options: [
-      { id: "analog-hook", name: "Analog Hook", tone: "simple singable synth motif" },
-      { id: "bell-answer", name: "Bell Answer", tone: "clear high answer phrases" },
-      { id: "vocal-hum", name: "Vocal Hum", tone: "rounded sustained melodic tones" },
-      { id: "pluck-counter", name: "Pluck Counter", tone: "small syncopated counter hook" },
+      {
+        id: "piano-1",
+        name: "Piano 1",
+        tone: "primary chord part",
+        fileName: "4-piano-1.mp3",
+        url: `${AUDIO_PATH}/4-piano-1.mp3`,
+        defaultGain: 0.76,
+      },
+      {
+        id: "piano-2",
+        name: "Piano 2",
+        tone: "alternate piano rhythm",
+        fileName: "4-piano-2.mp3",
+        url: `${AUDIO_PATH}/4-piano-2.mp3`,
+        defaultGain: 0.74,
+      },
+      {
+        id: "piano-3",
+        name: "Piano 3",
+        tone: "third piano voicing",
+        fileName: "4-paino-3.mp3",
+        url: `${AUDIO_PATH}/4-paino-3.mp3`,
+        defaultGain: 0.72,
+      },
+    ],
+  },
+  {
+    id: "solo",
+    name: "Solo",
+    order: 5,
+    accent: "#0a7bd8",
+    accentSoft: "rgba(10, 123, 216, 0.15)",
+    icon: "solo",
+    tone: "lead line and melodic spark",
+    visualKind: "melody",
+    options: [
+      {
+        id: "guitar-notes",
+        name: "Guitar Notes",
+        tone: "clean melodic guitar notes",
+        fileName: "solo-guitar-notes.mp3",
+        url: `${AUDIO_PATH}/solo-guitar-notes.mp3`,
+        defaultGain: 0.78,
+      },
+      {
+        id: "distort-guitar",
+        name: "Distort Guitar",
+        tone: "distorted lead contrast",
+        fileName: "solo-distort-guitar.mp3",
+        url: `${AUDIO_PATH}/solo-distort-guitar.mp3`,
+        defaultGain: 0.7,
+      },
+      {
+        id: "piano-solo",
+        name: "Piano Solo",
+        tone: "melodic piano solo phrase",
+        fileName: "solo-piano-1.mp3",
+        url: `${AUDIO_PATH}/solo-piano-1.mp3`,
+        defaultGain: 0.76,
+      },
     ],
   },
 ];
 
 export const LAYER_ORDER = LAYER_DEFINITIONS.map((layer) => layer.id);
+export const TOTAL_AUDIO_FILES = LAYER_DEFINITIONS.reduce((count, layer) => count + layer.options.length, 0);
 
 export const DEFAULT_SELECTIONS: SelectionState = {
-  rhythm: "soft-kit",
-  harmony: "felt-piano",
-  bass: "round-root",
-  melody: "analog-hook",
+  foundation: "bass-guitar",
+  texture: "synth-wavey",
+  drums: "drum-simple",
+  keys: "piano-1",
+  solo: "guitar-notes",
 };
 
 export const DEFAULT_VOLUMES: VolumeState = {
-  rhythm: 0.58,
-  harmony: 0.88,
-  bass: 0.56,
-  melody: 0.9,
+  foundation: 0.74,
+  texture: 0.64,
+  drums: 0.82,
+  keys: 0.68,
+  solo: 0.72,
 };
 
 export const DEFAULT_MUTES: MuteState = {
-  rhythm: false,
-  harmony: false,
-  bass: false,
-  melody: false,
+  foundation: false,
+  texture: false,
+  drums: false,
+  keys: false,
+  solo: false,
 };
 
 export const getLayer = (layerId: LayerId) =>
@@ -104,39 +234,8 @@ export const getNextLayerOptionId = (layerId: LayerId, currentOptionId: string) 
   return next?.id ?? currentOptionId;
 };
 
-export const LAYER_OPTION_MIX_PROFILES: Record<LayerId, Record<string, LayerMixProfile>> = {
-  rhythm: {
-    "soft-kit": { gain: 0.74, filterFrequency: 19000, activity: 1 },
-    "broken-snap": { gain: 0.72, filterFrequency: 18000, activity: 1 },
-    "pulse-drive": { gain: 0.68, filterFrequency: 19000, activity: 1 },
-    "half-time": { gain: 0.72, filterFrequency: 16000, activity: 1 },
-  },
-  harmony: {
-    "felt-piano": { gain: 1.22, filterFrequency: 12000, activity: 0.85 },
-    "tape-keys": { gain: 1.14, filterFrequency: 8500, activity: 0.82 },
-    "warm-pad": { gain: 1.06, filterFrequency: 4200, activity: 0.72 },
-    "glass-chimes": { gain: 1.1, filterFrequency: 15000, activity: 0.76 },
-  },
-  bass: {
-    "round-root": { gain: 0.78, filterFrequency: 900, activity: 0.82 },
-    "soft-sub": { gain: 0.74, filterFrequency: 260, activity: 0.74 },
-    "bass-guitar": { gain: 0.68, filterFrequency: 1800, activity: 0.84 },
-    "drive-bass": { gain: 0.62, filterFrequency: 1400, activity: 0.88 },
-  },
-  melody: {
-    "analog-hook": { gain: 1.18, filterFrequency: 9000, activity: 0.78 },
-    "bell-answer": { gain: 1.14, filterFrequency: 15000, activity: 0.68 },
-    "vocal-hum": { gain: 1.1, filterFrequency: 5500, activity: 0.6 },
-    "pluck-counter": { gain: 1.12, filterFrequency: 11000, activity: 0.72 },
-  },
-};
-
-export const getLayerMixProfile = (layerId: LayerId, optionId: string) =>
-  LAYER_OPTION_MIX_PROFILES[layerId][optionId] ?? {
-    gain: 1,
-    filterFrequency: 18000,
-    activity: 0.7,
-  };
+export const getLayerOptionGain = (layerId: LayerId, optionId: string) =>
+  getLayerOption(layerId, optionId)?.defaultGain ?? 1;
 
 export const createRandomSelection = (): SelectionState =>
   LAYER_DEFINITIONS.reduce((selection, layer) => {

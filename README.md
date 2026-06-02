@@ -1,15 +1,16 @@
-# DPI Layered Music Maker
+# DPI Layer Mixer
 
-Public packaging repo for the NFC-driven layered music maker.
+Public packaging repo for the DPI music layer demo.
 
 ## Folders
 
-- `current/` preserves the saved working build from `DPI_2`.
+- `current/` is the final five-channel stem visualizer for the DPI demo.
 - `shape-fork/` is the tangible shape/color experiment, where circle, triangle,
   square, and wave objects select generated musical variations.
 
-Both apps are React + TypeScript + Tailwind + Tone.js. Audio is generated in the
-browser; no backend is required for the current engine.
+Both apps are React + TypeScript + Tailwind + Tone.js. The current demo plays
+compressed browser-friendly stems from `current/public/audio/dpi/`; no backend
+is required.
 
 ## Run Current Build
 
@@ -39,16 +40,12 @@ Open:
 http://127.0.0.1:5175/
 ```
 
-## NFC Input
+## Input
 
-The Web Serial adapter lives in each app at:
+The current app uses mock ESP32/NFC controls and keyboard shortcuts `1` through
+`5` for the first demo build. The older PN532 Web Serial adapter remains in the
+source tree as reference code for future hardware protocol work.
 
 ```text
-src/input/HardwareInputAdapter.ts
+current/src/input/
 ```
-
-The current microcontroller sketch prints PN532 `UID:` lines at `115200` baud.
-For now, any scanned tag acts like a randomizer so the physical input path can
-be tested before assigning fixed tag meanings. Replace
-`mapNfcUidToLayerInputEvent` when real NFC objects should map to exact layers or
-options.

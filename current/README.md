@@ -1,12 +1,17 @@
-# DPI Layered Music Maker
+# DPI Layer Mixer
 
-A clean React + TypeScript web instrument for mixing four composed musical
-layers: Rhythm, Harmony, Bass, and Melody.
+A React + TypeScript demo instrument for showing how five music channels layer
+into one composition. The UI is built as a live visualizer for an audience:
+each channel has three stem options, its own volume control, and a distinct
+visual language inside the shared timeline.
 
-The current app does not use the Audacity project as audio, stems, or a timing
-map. The Audacity file is only a reference for the broad palette: drums, piano,
-bass, and synth. Playback is generated live in Tone.js on a shared 120 BPM,
-4-bar grid so every option combination stays aligned and musical.
+The playable demo audio comes from the local `DPI Music/` WAV stems. The source
+files are preserved untouched, and browser-friendly 96-second MP3 demo cuts live
+under:
+
+```text
+public/audio/dpi/
+```
 
 ## Run
 
@@ -15,60 +20,41 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. In this session the dev server was running at:
-
-```text
-http://127.0.0.1:5174/
-```
+Open the local URL printed by Vite.
 
 ## Use
 
-- Select one sound option in each of the four layer columns.
-- Press Play to start the shared 120 BPM loop.
-- Use Randomize for a coherent new combination.
-- Mute or adjust volume per layer.
-- Click NFC cards or press keys `1`, `2`, `3`, `4` to cycle layer sound options.
-- Use Connect NFC to attach a Web Serial hardware reader.
+- Press Play to load and start the synced five-channel stem stack.
+- Select one option in each channel: Foundation, Texture, Drums, Keys, and Solo.
+- Use Randomize for a new five-layer combination.
+- Mute or adjust volume per channel.
+- Click mock NFC tags or press keys `1`, `2`, `3`, `4`, `5` to cycle layer options.
+- Use the ESP32 controls as demo-status UI for now; live five-encoder hardware parsing is intentionally out of this first build.
+
+## Channel Map
+
+```text
+Foundation  Bass Guitar, Bass Guitar B, Bouncy Synth Chords
+Texture     Synth Wavey, Brushed Snare, Ethereal Echo Thing
+Drums       Drum Simple, Drum Poom Tss, Drum w Duck
+Keys        Piano 1, Piano 2, Piano 3
+Solo        Guitar Notes, Distort Guitar, Piano Solo
+```
 
 ## Architecture
 
 ```text
-src/audio/ComposedMusicEngine.ts  Tone.js instruments, transport, patterns, mix
-src/data/layers.ts                Layer definitions, defaults, BPM/key/loop
-src/input/MockNfcAdapter.ts       Keyboard mock adapter
-src/input/HardwareInputAdapter.ts Web Serial PN532 adapter
-src/components/*                  Minimal instrument UI
+src/audio/StemMusicEngine.ts  Tone.js sample players, loading, sync, progress
+src/data/layers.ts            Five-channel stem metadata and defaults
+src/input/MockNfcAdapter.ts   Keyboard mock adapter for keys 1-5
+src/components/*              Visualizer, channel strips, transport, mock hardware UI
+public/audio/dpi/*            Compressed 96-second MP3 demo stems
 ```
 
-All input paths emit the same event shape:
+All input paths keep the same event shape:
 
 ```ts
 { layerId, optionId, source }
 ```
 
 That keeps the UI and audio engine independent from the physical input transport.
-
-## NFC Hardware Input
-
-The hardware path is implemented in `src/input/HardwareInputAdapter.ts`.
-
-The existing XIAO ESP32-C6 + PN532 Arduino sketch prints tag data at `115200` baud:
-
-```text
-NFC tag recognized
-  UID: AA:BB:CC
-```
-
-The Web Serial adapter parses `UID:` lines. For now, each recognized NFC touch
-acts like a physical randomizer: the UI chooses an unmuted layer and moves it to a
-different sound option, then shows the exact before/after change in the Composition
-panel and NFC input status. Later, replace `mapNfcUidToLayerInputEvent` with a
-fixed UID-to-layer or UID-to-option mapping if each physical object should always
-represent a specific musical layer.
-
-## Notes
-
-- Audio is entirely client-side. No backend is needed for the current engine.
-- Option changes while playing are queued and committed on the next bar.
-- Every layer shares the same BPM, key center, chord progression, and 64-step
-  loop grid.
