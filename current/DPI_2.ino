@@ -384,12 +384,65 @@ static bool readNtagPageWithRetry(Adafruit_PN532 &reader, uint8_t pageNumber, ui
   return false;
 }
 
+static bool readDpiPayloadFromKnownPages(Adafruit_PN532 &reader, String &payload) {
+  payload = "";
+  lastNtagReadError = "";
+
+  uint8_t firstPage[4] = {0};
+  if (!readNtagPageWithRetry(reader, 4, firstPage)) {
+    return false;
+  }
+
+  if (firstPage[0] != 0x03) {
+    lastNtagReadError = "dpi-tlv-not-at-page-4";
+    return false;
+  }
+
+  const uint16_t tlvLength = firstPage[1];
+  if (tlvLength == 0 || tlvLength == 0xFF || tlvLength > NDEF_READ_LIMIT - 3) {
+    lastNtagReadError = "dpi-tlv-length-invalid";
+    return false;
+  }
+
+  const uint16_t totalLength = tlvLength + 2;
+  uint8_t data[NDEF_READ_LIMIT] = {0};
+  memcpy(data, firstPage, 4);
+
+  uint16_t loaded = 4;
+  while (loaded < totalLength) {
+    uint8_t page[4] = {0};
+    const uint8_t pageNumber = 4 + (loaded / 4);
+    if (!readNtagPageWithRetry(reader, pageNumber, page)) {
+      return false;
+    }
+
+    const uint8_t bytesToCopy = min((uint16_t)4, (uint16_t)(totalLength - loaded));
+    memcpy(data + loaded, page, bytesToCopy);
+    loaded += bytesToCopy;
+  }
+
+  if (!parseNdefUriRecord(data + 2, tlvLength, payload)) {
+    lastNtagReadError = "dpi-payload-not-found";
+    return false;
+  }
+
+  return true;
+}
+
 static bool readDpiPayloadFromNtag(Adafruit_PN532 &reader, String &payload) {
   payload = "";
   lastNtagReadError = "";
 
+  if (readDpiPayloadFromKnownPages(reader, payload)) {
+    return true;
+  }
+  const String directReadError = lastNtagReadError;
+
   uint8_t cc[4] = {0};
   if (!readNtagPageWithRetry(reader, 3, cc)) {
+    if (directReadError.length() > 0) {
+      lastNtagReadError = directReadError;
+    }
     return false;
   }
 
