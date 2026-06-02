@@ -911,7 +911,8 @@ input:focus-visible {
 
 .studio-status-card.write-queued,
 .studio-status-card.write-ready,
-.studio-status-card.write-writing {
+.studio-status-card.write-writing,
+.studio-status-card.write-unverified {
   border-color: #d9a000;
   background: #fffbeb;
 }

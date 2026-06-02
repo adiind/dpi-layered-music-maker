@@ -51,6 +51,7 @@ const writeStateLabel = (status: NfcWriteStatus) => {
   if (status.state === "ready") return "Tap card now";
   if (status.state === "writing") return "Writing";
   if (status.state === "verified") return "Verified";
+  if (status.state === "unverified") return "Sent, not verified";
   if (status.state === "read") return "Read from card";
   if (status.state === "unsupported") return "Unsupported tag";
   if (status.state === "failed") return "Needs attention";

@@ -11,6 +11,7 @@
 //   BUTTON:<layerId>:PRESS
 //   WRITE_READY:<tagId>:<payload>
 //   WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
+//   WRITE_UNVERIFIED:<tagId>:<uid>:<layerId>:<optionId>:<reason>
 //   WRITE_FAIL:<tagId>:<reason>
 //   READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
 //   TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
@@ -175,6 +176,24 @@ static void printWriteDebug(const char *tagId, const String &message) {
   Serial.print(tagId);
   Serial.print(":");
   Serial.println(message);
+}
+
+static void printWriteUnverified(
+    const NfcReaderState &readerState,
+    const String &uidText,
+    const LayerSpec &layer,
+    const char *optionId,
+    const String &reason) {
+  Serial.print("WRITE_UNVERIFIED:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.print(uidText);
+  Serial.print(":");
+  Serial.print(layer.id);
+  Serial.print(":");
+  Serial.print(optionId);
+  Serial.print(":");
+  Serial.println(reason);
 }
 
 static void printTagUnsupported(const NfcReaderState &readerState, const String &uidText, uint8_t uidLength) {
@@ -712,7 +731,9 @@ static void writeDpiPayloadToTag(NfcReaderState &readerState, const LayerSpec &l
       return;
     }
 
-    printWriteFail(readerState.tagId, "verify-read-failed");
+    readerState.lastUid = uidText;
+    readerState.lastSeenMs = millis();
+    printWriteUnverified(readerState, uidText, layer, optionId, reason);
     return;
   }
 

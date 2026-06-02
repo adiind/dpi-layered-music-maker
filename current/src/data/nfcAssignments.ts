@@ -138,3 +138,26 @@ export const updateNfcAssignment = (
 
   return saveNfcAssignments(normalized);
 };
+
+export const updateNfcAssignmentUid = (
+  assignments: NfcTagAssignment[],
+  tagId: NfcTagId,
+  uid?: string,
+) => {
+  if (!isTagId(tagId) || !uid?.trim()) {
+    return sanitizeNfcAssignments(assignments);
+  }
+
+  const updatedAt = new Date().toISOString();
+  const normalized = sanitizeNfcAssignments(assignments).map((assignment) =>
+    assignment.tagId === tagId
+      ? {
+          ...assignment,
+          uid: uid.trim(),
+          updatedAt,
+        }
+      : assignment,
+  );
+
+  return saveNfcAssignments(normalized);
+};

@@ -58,6 +58,7 @@ export interface LayerInputEvent {
 export type NfcCardEventKind =
   | "write-ready"
   | "write-success"
+  | "write-unverified"
   | "write-fail"
   | "read-card"
   | "unsupported";
@@ -78,6 +79,7 @@ export type NfcWriteState =
   | "ready"
   | "writing"
   | "verified"
+  | "unverified"
   | "failed"
   | "read"
   | "unsupported";

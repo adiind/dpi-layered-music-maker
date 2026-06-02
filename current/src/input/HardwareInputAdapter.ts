@@ -146,6 +146,24 @@ export const parseNfcCardEventLine = (line: string): NfcCardEvent | undefined =>
     };
   }
 
+  const writeUnverified = line.match(/^\s*WRITE_UNVERIFIED:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*:\s*([a-z0-9-]+)\s*:\s*([a-z0-9-]+)\s*:\s*(.+)\s*$/i);
+  if (writeUnverified) {
+    const tagId = writeUnverified[1].toLowerCase();
+    const layerId = writeUnverified[3].toLowerCase();
+    const optionId = writeUnverified[4];
+    if (!isTagId(tagId) || !isLayerId(layerId) || !getLayerOption(layerId, optionId)) return undefined;
+
+    return {
+      kind: "write-unverified",
+      tagId,
+      uid: normalizeUid(writeUnverified[2]),
+      layerId,
+      optionId,
+      payload: buildDpiPayload(layerId, optionId),
+      message: writeUnverified[5].trim(),
+    };
+  }
+
   const writeFail = line.match(/^\s*WRITE_FAIL:\s*(tag-[1-5])\s*:\s*(.+)\s*$/i);
   if (writeFail) {
     const tagId = writeFail[1].toLowerCase();

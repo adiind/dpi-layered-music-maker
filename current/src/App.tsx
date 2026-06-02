@@ -25,6 +25,7 @@ import {
   resetNfcAssignments,
   resolveNfcAssignment,
   updateNfcAssignment,
+  updateNfcAssignmentUid,
 } from "./data/nfcAssignments";
 import { HardwareInputAdapter, isWebSerialNfcSupported } from "./input/HardwareInputAdapter";
 import type { InputConnectionStatus } from "./input/InputAdapter";
@@ -362,11 +363,23 @@ const App = () => {
         const tagId = tagReadMatch[1].toLowerCase();
         const uid = tagReadMatch[2]?.match(/[0-9a-fA-F]{2}/g)?.map((byte) => byte.toUpperCase()).join(":");
         if (isNfcTagId(tagId)) {
+          const savedAssignment = uid
+            ? nfcAssignmentsRef.current.find((assignment) => assignment.uid === uid || assignment.tagId === tagId)
+            : nfcAssignmentsRef.current.find((assignment) => assignment.tagId === tagId);
+          const layer = savedAssignment ? getLayer(savedAssignment.layerId) : undefined;
+          const option = savedAssignment ? getLayerOption(savedAssignment.layerId, savedAssignment.optionId) : undefined;
+          const uidMatched = Boolean(uid && savedAssignment?.uid === uid);
+
           updateReaderStatus(tagId, {
-            state: "tag-unassigned",
-            title: `${getReaderLabel(tagId)} unassigned tag`,
-            detail: uid ? `UID ${uid} - no DPI payload yet` : "Raw NFC tag detected without a DPI payload.",
+            state: uidMatched ? "tag-assigned" : "tag-unassigned",
+            title: uidMatched ? `${getReaderLabel(tagId)} UID assigned` : `${getReaderLabel(tagId)} unassigned tag`,
+            detail: uidMatched && layer && option
+              ? `${layer.name} / ${option.name} - UID ${uid}`
+              : uid ? `UID ${uid} - no readable DPI payload yet` : "Raw NFC tag detected without a DPI payload.",
             uid,
+            layerId: uidMatched ? savedAssignment?.layerId : undefined,
+            optionId: uidMatched ? savedAssignment?.optionId : undefined,
+            payload: uidMatched ? `dpi://v1/layer/${savedAssignment!.layerId}/option/${savedAssignment!.optionId}` : undefined,
             atLabel: nowLabel,
           });
         }
@@ -437,6 +450,42 @@ const App = () => {
           kind: "write",
           title: "Card write verified",
           detail,
+          tagId: event.tagId,
+          atLabel: formatNow(),
+        });
+        return;
+      }
+
+      if (event.kind === "write-unverified") {
+        if (event.uid) {
+          setNfcAssignments((current) => updateNfcAssignmentUid(current, event.tagId, event.uid));
+        }
+
+        updateReaderStatus(event.tagId, {
+          state: "tag-assigned",
+          title: `${readerLabel} write sent`,
+          detail: `${detail} - verify blocked: ${event.message ?? "readback unavailable"}`,
+          uid: event.uid,
+          layerId: event.layerId,
+          optionId: event.optionId,
+          payload: event.payload,
+          atLabel: formatNow(),
+        });
+        setNfcWriteStatus({
+          state: "unverified",
+          title: `${readerLabel} write sent, not verified`,
+          detail: `${detail}. PN532 could not read card memory back: ${event.message ?? "readback unavailable"}.`,
+          tagId: event.tagId,
+          layerId: event.layerId,
+          optionId: event.optionId,
+          uid: event.uid,
+          payload: event.payload,
+          atLabel: formatNow(),
+        });
+        setHardwareActivity({
+          kind: "write",
+          title: "Card write sent",
+          detail: `Readback blocked: ${event.message ?? "memory read unavailable"}. UID is saved for the demo.`,
           tagId: event.tagId,
           atLabel: formatNow(),
         });
