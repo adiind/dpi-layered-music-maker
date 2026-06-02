@@ -1,4 +1,5 @@
 ## Codex
+- Flashed the ESP32 firmware with page-by-page NTAG NDEF writing and retrying readback verification.
 - Reworked ESP32 NTAG writing to emit the DPI NDEF URI page-by-page and retry readback verification after card reselection.
 - Pushed the updated NFC Studio, ESP32 firmware, and hardware docs snapshot to GitHub PR #1 on `codex/final-demo-visualizer`.
 - Flashed the tuned ESP32 PN532 firmware with longer NTAG215 polling windows after a manual BOOT upload.
