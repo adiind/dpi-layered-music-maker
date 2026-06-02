@@ -1,5 +1,6 @@
-import { LAYER_DEFINITIONS } from "../data/layers";
-import type { LayerInputEvent } from "../types/music";
+import { getLayerOption, LAYER_DEFINITIONS } from "../data/layers";
+import { loadNfcAssignments, resolveNfcAssignment } from "../data/nfcAssignments";
+import type { LayerId, LayerInputEvent, NfcCardEvent, NfcTagId } from "../types/music";
 import type {
   InputConnectionStatus,
   InputListener,
@@ -9,6 +10,8 @@ import type {
 
 const DEFAULT_BAUD_RATE = 115200;
 const DUPLICATE_UID_WINDOW_MS = 750;
+const LAYER_IDS = LAYER_DEFINITIONS.map((layer) => layer.id);
+const TAG_IDS: NfcTagId[] = ["tag-1", "tag-2", "tag-3", "tag-4", "tag-5"];
 
 type SerialPortInfo = {
   usbVendorId?: number;
@@ -24,6 +27,7 @@ export type WebSerialNfcRequestOptions = {
 
 type SerialPortLike = {
   readable: ReadableStream<Uint8Array> | null;
+  writable?: WritableStream<Uint8Array> | null;
   open(options: { baudRate: number }): Promise<void>;
   close(): Promise<void>;
   getInfo?(): SerialPortInfo;
@@ -34,9 +38,17 @@ type SerialLike = {
   getPorts?(): Promise<SerialPortLike[]>;
 };
 
+type SerialLineListener = (line: string) => void;
+type CardEventListener = (event: NfcCardEvent) => void;
+
 type NavigatorWithSerial = Navigator & {
   serial?: SerialLike;
 };
+
+interface KnownTagRead {
+  tagId: NfcTagId;
+  uid?: string;
+}
 
 export const parseNfcUidLine = (line: string) => {
   const match = line.match(/^\s*UID:\s*([0-9a-fA-F][0-9a-fA-F:\-\s]*)\s*$/);
@@ -44,6 +56,140 @@ export const parseNfcUidLine = (line: string) => {
 
   const bytes = match[1].match(/[0-9a-fA-F]{2}/g);
   return bytes?.length ? bytes.map((byte) => byte.toUpperCase()).join(":") : undefined;
+};
+
+const isLayerId = (value: string): value is LayerId =>
+  LAYER_IDS.includes(value as LayerId);
+
+const isTagId = (value: string): value is NfcTagId =>
+  TAG_IDS.includes(value as NfcTagId);
+
+export const parseLayerSelectionLine = (line: string): LayerInputEvent | undefined => {
+  const match = line.match(/^\s*LAYER:\s*([a-z0-9-]+)\s*:\s*([a-z0-9-]+)\s*$/i);
+  if (!match) return undefined;
+
+  const [, layerValue, optionId] = match;
+  const layerId = layerValue.toLowerCase();
+  if (!isLayerId(layerId) || !getLayerOption(layerId, optionId)) return undefined;
+
+  return {
+    layerId,
+    optionId,
+    source: "hardware",
+  };
+};
+
+export const parseKnownTagLine = (line: string): KnownTagRead | undefined => {
+  const match = line.match(/^\s*TAG:\s*(tag-[1-5])(?:\s*:\s*([0-9a-fA-F:\-\s]+))?\s*$/i);
+  if (!match) return undefined;
+
+  const tagId = match[1].toLowerCase();
+  if (!isTagId(tagId)) return undefined;
+
+  const bytes = match[2]?.match(/[0-9a-fA-F]{2}/g);
+  return {
+    tagId,
+    uid: bytes?.length ? bytes.map((byte) => byte.toUpperCase()).join(":") : undefined,
+  };
+};
+
+const normalizeUid = (value?: string) => {
+  const bytes = value?.match(/[0-9a-fA-F]{2}/g);
+  return bytes?.length ? bytes.map((byte) => byte.toUpperCase()).join(":") : undefined;
+};
+
+const buildDpiPayload = (layerId: LayerId, optionId: string) =>
+  `dpi://v1/layer/${layerId}/option/${optionId}`;
+
+export const parseDpiPayload = (payload: string) => {
+  const match = payload.match(/^dpi:\/\/v1\/layer\/([a-z0-9-]+)\/option\/([a-z0-9-]+)$/i);
+  if (!match) return undefined;
+
+  const layerId = match[1].toLowerCase();
+  const optionId = match[2];
+  if (!isLayerId(layerId) || !getLayerOption(layerId, optionId)) return undefined;
+
+  return { layerId, optionId };
+};
+
+export const parseNfcCardEventLine = (line: string): NfcCardEvent | undefined => {
+  const writeReady = line.match(/^\s*WRITE_READY:\s*(tag-[1-5])\s*:\s*(.+)\s*$/i);
+  if (writeReady) {
+    const tagId = writeReady[1].toLowerCase();
+    if (!isTagId(tagId)) return undefined;
+
+    const payload = writeReady[2].trim();
+    const parsed = parseDpiPayload(payload);
+    return {
+      kind: "write-ready",
+      tagId,
+      layerId: parsed?.layerId,
+      optionId: parsed?.optionId,
+      payload,
+    };
+  }
+
+  const writeSuccess = line.match(/^\s*WRITE_SUCCESS:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*:\s*([a-z0-9-]+)\s*:\s*([a-z0-9-]+)\s*$/i);
+  if (writeSuccess) {
+    const tagId = writeSuccess[1].toLowerCase();
+    const layerId = writeSuccess[3].toLowerCase();
+    const optionId = writeSuccess[4];
+    if (!isTagId(tagId) || !isLayerId(layerId) || !getLayerOption(layerId, optionId)) return undefined;
+
+    return {
+      kind: "write-success",
+      tagId,
+      uid: normalizeUid(writeSuccess[2]),
+      layerId,
+      optionId,
+      payload: buildDpiPayload(layerId, optionId),
+    };
+  }
+
+  const writeFail = line.match(/^\s*WRITE_FAIL:\s*(tag-[1-5])\s*:\s*(.+)\s*$/i);
+  if (writeFail) {
+    const tagId = writeFail[1].toLowerCase();
+    if (!isTagId(tagId)) return undefined;
+
+    return {
+      kind: "write-fail",
+      tagId,
+      message: writeFail[2].trim(),
+    };
+  }
+
+  const readCard = line.match(/^\s*READ_CARD:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*:\s*([a-z0-9-]+)\s*:\s*([a-z0-9-]+)\s*:\s*(.+)\s*$/i);
+  if (readCard) {
+    const tagId = readCard[1].toLowerCase();
+    const layerId = readCard[3].toLowerCase();
+    const optionId = readCard[4];
+    const payload = readCard[5].trim();
+    if (!isTagId(tagId) || !isLayerId(layerId) || !getLayerOption(layerId, optionId)) return undefined;
+
+    return {
+      kind: "read-card",
+      tagId,
+      uid: normalizeUid(readCard[2]),
+      layerId,
+      optionId,
+      payload,
+    };
+  }
+
+  const unsupported = line.match(/^\s*TAG_UNSUPPORTED:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*:\s*(.+)\s*$/i);
+  if (unsupported) {
+    const tagId = unsupported[1].toLowerCase();
+    if (!isTagId(tagId)) return undefined;
+
+    return {
+      kind: "unsupported",
+      tagId,
+      uid: normalizeUid(unsupported[2]),
+      message: unsupported[3].trim(),
+    };
+  }
+
+  return undefined;
 };
 
 const randomIndex = (length: number) => {
@@ -69,6 +215,18 @@ export const mapNfcUidToLayerInputEvent = (uid: string): LayerInputEvent => {
   };
 };
 
+export const mapKnownTagToLayerInputEvent = (tagId: NfcTagId, uid?: string): LayerInputEvent => {
+  const assignment = resolveNfcAssignment(loadNfcAssignments(), tagId);
+
+  return {
+    layerId: assignment.layerId,
+    optionId: assignment.optionId,
+    source: "hardware",
+    tagId,
+    uid,
+  };
+};
+
 const getSerial = () =>
   typeof navigator === "undefined" ? undefined : (navigator as NavigatorWithSerial).serial;
 
@@ -89,10 +247,13 @@ const getPortName = (port: SerialPortLike) => {
 export class WebSerialNfcAdapter implements LayerInputAdapter {
   private readonly listeners = new Set<InputListener>();
   private readonly statusListeners = new Set<InputStatusListener>();
+  private readonly lineListeners = new Set<SerialLineListener>();
+  private readonly cardEventListeners = new Set<CardEventListener>();
   private readonly baudRate: number;
   private status: InputConnectionStatus = { state: "idle" };
   private port?: SerialPortLike;
   private reader?: ReadableStreamDefaultReader<Uint8Array>;
+  private writer?: WritableStreamDefaultWriter<Uint8Array>;
   private readLoopPromise?: Promise<void>;
   private textBuffer = "";
   private shouldRead = false;
@@ -118,8 +279,36 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     };
   }
 
+  onSerialLine(listener: SerialLineListener) {
+    this.lineListeners.add(listener);
+    return () => {
+      this.lineListeners.delete(listener);
+    };
+  }
+
+  onCardEvent(listener: CardEventListener) {
+    this.cardEventListeners.add(listener);
+    return () => {
+      this.cardEventListeners.delete(listener);
+    };
+  }
+
   getStatus() {
     return this.status;
+  }
+
+  async writeTag(tagId: NfcTagId, layerId: LayerId, optionId: string) {
+    if (!this.port || !this.writer) {
+      throw new Error("Connect the ESP32 before writing a card.");
+    }
+
+    if (!isTagId(tagId) || !getLayerOption(layerId, optionId)) {
+      throw new Error("Choose a valid reader and layer option before writing.");
+    }
+
+    const command = `WRITE:${tagId}:${layerId}:${optionId}\n`;
+    await this.writer.write(new TextEncoder().encode(command));
+    this.emitLine(`> ${command.trim()}`);
   }
 
   async requestAndConnect(options?: WebSerialNfcRequestOptions) {
@@ -186,12 +375,19 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     await this.readLoopPromise;
 
     try {
+      this.writer?.releaseLock();
+    } catch {
+      // Releasing a closed writer lock is harmless for this adapter.
+    }
+
+    try {
       await this.port?.close();
     } catch {
       // Closing an already-disconnected port is harmless for this adapter.
     }
 
     this.reader = undefined;
+    this.writer = undefined;
     this.port = undefined;
     this.readLoopPromise = undefined;
     this.textBuffer = "";
@@ -207,6 +403,7 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     try {
       await port.open({ baudRate: this.baudRate });
       this.port = port;
+      this.writer = port.writable?.getWriter();
       this.shouldRead = true;
       this.readLoopPromise = this.readLoop(port);
       this.setStatus({ state: "connected", portName });
@@ -274,6 +471,38 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
   }
 
   private handleLine(line: string) {
+    const trimmedLine = line.trim();
+    if (trimmedLine) {
+      this.emitLine(trimmedLine);
+    }
+
+    const exactSelection = parseLayerSelectionLine(line);
+    if (exactSelection) {
+      this.emit(exactSelection);
+      return;
+    }
+
+    const cardEvent = parseNfcCardEventLine(line);
+    if (cardEvent) {
+      this.emitCardEvent(cardEvent);
+      if (cardEvent.kind === "read-card" && cardEvent.layerId && cardEvent.optionId) {
+        this.emit({
+          layerId: cardEvent.layerId,
+          optionId: cardEvent.optionId,
+          source: "hardware",
+          tagId: cardEvent.tagId,
+          uid: cardEvent.uid,
+        });
+      }
+      return;
+    }
+
+    const tagRead = parseKnownTagLine(line);
+    if (tagRead) {
+      this.emit(mapKnownTagToLayerInputEvent(tagRead.tagId, tagRead.uid));
+      return;
+    }
+
     const uid = parseNfcUidLine(line);
     if (!uid) return;
 
@@ -287,6 +516,18 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
 
   private emit(event: LayerInputEvent) {
     for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+
+  private emitLine(line: string) {
+    for (const listener of this.lineListeners) {
+      listener(line);
+    }
+  }
+
+  private emitCardEvent(event: NfcCardEvent) {
+    for (const listener of this.cardEventListeners) {
       listener(event);
     }
   }

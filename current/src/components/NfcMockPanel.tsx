@@ -1,16 +1,18 @@
-import { LAYER_DEFINITIONS } from "../data/layers";
-import { layerKeyHint } from "../input/MockNfcAdapter";
-import type { LayerId, VolumeState } from "../types/music";
+import type { CSSProperties } from "react";
+import { getLayer, getLayerOption, LAYER_DEFINITIONS } from "../data/layers";
+import type { NfcTagAssignment, NfcTagId, VolumeState } from "../types/music";
 import { TagIcon } from "./icons";
 
 interface NfcMockPanelProps {
-  onTap: (layerId: LayerId) => void;
+  assignments: NfcTagAssignment[];
+  onTap: (tagId: NfcTagId) => void;
   volumes: VolumeState;
   espConnected: boolean;
   lastInputLabel: string;
 }
 
 export const NfcMockPanel = ({
+  assignments,
   onTap,
   volumes,
   espConnected,
@@ -48,19 +50,24 @@ export const NfcMockPanel = ({
     <div className="tag-bank">
       <span>NFC Tags</span>
       <div>
-        {LAYER_DEFINITIONS.map((layer) => (
-          <button
-            key={layer.id}
-            type="button"
-            onClick={() => onTap(layer.id)}
-            style={{ "--layer-color": layer.accent } as React.CSSProperties}
-            aria-label={`Mock NFC tag for ${layer.name}`}
-          >
-            <TagIcon />
-            <strong>Tag {layer.order}</strong>
-            <em>Key {layerKeyHint(layer.id)}</em>
-          </button>
-        ))}
+        {assignments.map((assignment) => {
+          const layer = getLayer(assignment.layerId);
+          const option = getLayerOption(assignment.layerId, assignment.optionId);
+
+          return (
+            <button
+              key={assignment.tagId}
+              type="button"
+              onClick={() => onTap(assignment.tagId)}
+              style={{ "--layer-color": layer?.accent ?? "#111827" } as CSSProperties}
+              aria-label={`Mock NFC tag ${assignment.label}: ${layer?.name ?? assignment.layerId} ${option?.name ?? assignment.optionId}`}
+            >
+              <TagIcon />
+              <strong>{assignment.label}</strong>
+              <em>{option?.name ?? assignment.optionId}</em>
+            </button>
+          );
+        })}
       </div>
     </div>
 

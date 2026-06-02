@@ -1,208 +1,789 @@
-#include <Wire.h>
+#include <Arduino.h>
 #include <Adafruit_PN532.h>
 
-#ifndef SDA
-#define SDA 22
-#endif
+// DPI final demo controller for an ESP32-WROOM-32 / 38-pin dev board.
+// Hardware: 5x KY-040 rotary encoders and 5x PN532 readers in SPI mode.
+// Serial baud: 115200.
+//
+// App-readable serial events:
+//   LAYER:<layerId>:<optionId>
+//   TAG:<tagId>:<uid>
+//   BUTTON:<layerId>:PRESS
+//   WRITE_READY:<tagId>:<payload>
+//   WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
+//   WRITE_FAIL:<tagId>:<reason>
+//   READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
+//   TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 
-#ifndef SCL
-#define SCL 23
-#endif
+constexpr uint32_t SERIAL_BAUD = 115200;
+constexpr uint16_t NFC_READ_TIMEOUT_MS = 120;
+constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
+constexpr uint32_t NFC_REPEAT_WINDOW_MS = 1200;
+constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
+constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
+constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
+constexpr uint16_t NDEF_READ_LIMIT = 160;
+constexpr size_t DPI_PAYLOAD_LIMIT = 96;
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 45;
 
-#ifndef D6
-#define D6 16
-#endif
+const char DPI_PAYLOAD_PREFIX[] = "dpi://v1/layer/";
+const char DPI_PAYLOAD_OPTION_MARKER[] = "/option/";
 
-#ifndef D7
-#define D7 17
-#endif
+constexpr uint8_t PN532_SCK = 18;
+constexpr uint8_t PN532_MISO = 19;
+constexpr uint8_t PN532_MOSI = 23;
 
-// The Adafruit PN532 library accepts -1 for unused IRQ and reset pins.
-#define PN532_IRQ -1
-#define PN532_RESET -1
-#define PN532_UART_RX D7
-#define PN532_UART_TX D6
+constexpr uint8_t PN532_CS_FOUNDATION = 5;
+constexpr uint8_t PN532_CS_TEXTURE = 4;
+constexpr uint8_t PN532_CS_DRUMS = 15;
+constexpr uint8_t PN532_CS_KEYS = 2;
+constexpr uint8_t PN532_CS_SOLO = 0;
 
-HardwareSerial pn532Serial(1);
-Adafruit_PN532 nfcI2C(PN532_IRQ, PN532_RESET, &Wire);
-Adafruit_PN532 nfcUART(PN532_RESET, &pn532Serial);
-Adafruit_PN532 *nfc = nullptr;
-const char *readerPort = nullptr;
-unsigned long lastReaderRetryMs = 0;
+Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
+Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
+Adafruit_PN532 nfcDrums(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_DRUMS);
+Adafruit_PN532 nfcKeys(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_KEYS);
+Adafruit_PN532 nfcSolo(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_SOLO);
+
+struct LayerSpec {
+  const char *id;
+  const char *name;
+  const char *options[3];
+};
+
+const LayerSpec LAYERS[] = {
+    {"foundation", "Foundation", {"bass-guitar", "bass-guitar-b", "bouncy-synth-chords"}},
+    {"texture", "Texture", {"synth-wavey", "brushed-snare", "ethereal-echo-thing"}},
+    {"drums", "Drums", {"drum-simple", "drum-poom-tss", "drum-w-duck"}},
+    {"keys", "Keys", {"piano-1", "piano-2", "piano-3"}},
+    {"solo", "Solo", {"guitar-notes", "distort-guitar", "piano-solo"}},
+};
+
+struct EncoderState {
+  const char *layerId;
+  const char *label;
+  uint8_t clkPin;
+  uint8_t dtPin;
+  uint8_t swPin;
+  uint8_t optionIndex;
+  uint8_t lastState;
+  int8_t accumulator;
+  bool lastButtonPressed;
+  uint32_t lastButtonChangeMs;
+};
+
+EncoderState encoders[] = {
+    {"foundation", "Foundation", 32, 33, 25, 0, 0, 0, false, 0},
+    {"texture", "Texture", 26, 27, 14, 0, 0, 0, false, 0},
+    {"drums", "Drums", 16, 17, 13, 0, 0, 0, false, 0},
+    {"keys", "Keys", 34, 35, 21, 0, 0, 0, false, 0},
+    {"solo", "Solo", 36, 39, 22, 0, 0, 0, false, 0},
+};
+
+struct NfcReaderState {
+  const char *tagId;
+  const char *layerId;
+  const char *label;
+  uint8_t csPin;
+  Adafruit_PN532 *reader;
+  bool ready;
+  uint32_t lastRetryMs;
+  uint32_t lastSeenMs;
+  String lastUid;
+};
+
+NfcReaderState nfcReaders[] = {
+    {"tag-1", "foundation", "Foundation reader", PN532_CS_FOUNDATION, &nfcFoundation, false, 0, 0, ""},
+    {"tag-2", "texture", "Texture reader", PN532_CS_TEXTURE, &nfcTexture, false, 0, 0, ""},
+    {"tag-3", "drums", "Drums reader", PN532_CS_DRUMS, &nfcDrums, false, 0, 0, ""},
+    {"tag-4", "keys", "Keys reader", PN532_CS_KEYS, &nfcKeys, false, 0, 0, ""},
+    {"tag-5", "solo", "Solo reader", PN532_CS_SOLO, &nfcSolo, false, 0, 0, ""},
+};
+
+constexpr size_t LAYER_COUNT = sizeof(LAYERS) / sizeof(LAYERS[0]);
+constexpr size_t ENCODER_COUNT = sizeof(encoders) / sizeof(encoders[0]);
+constexpr size_t NFC_READER_COUNT = sizeof(nfcReaders) / sizeof(nfcReaders[0]);
+
+String serialCommand;
+
+// Quadrature transition table. Four valid transitions make one detent.
+const int8_t QUADRATURE_TABLE[16] = {
+    0, -1, 1, 0,
+    1, 0, 0, -1,
+    -1, 0, 0, 1,
+    0, 1, -1, 0,
+};
+
+static bool supportsInternalPullup(uint8_t pin) {
+  return pin < 34;
+}
+
+static uint8_t readEncoderState(const EncoderState &encoder) {
+  const uint8_t clk = digitalRead(encoder.clkPin) == HIGH ? 1 : 0;
+  const uint8_t dt = digitalRead(encoder.dtPin) == HIGH ? 1 : 0;
+  return (clk << 1) | dt;
+}
+
+static const LayerSpec *findLayer(const char *layerId) {
+  for (size_t index = 0; index < LAYER_COUNT; index++) {
+    if (strcmp(LAYERS[index].id, layerId) == 0) {
+      return &LAYERS[index];
+    }
+  }
+
+  return nullptr;
+}
+
+static NfcReaderState *findNfcReader(const char *tagId) {
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    if (strcmp(nfcReaders[index].tagId, tagId) == 0) {
+      return &nfcReaders[index];
+    }
+  }
+
+  return nullptr;
+}
+
+static const char *findLayerOption(const LayerSpec &layer, const char *optionId) {
+  for (uint8_t index = 0; index < 3; index++) {
+    if (strcmp(layer.options[index], optionId) == 0) {
+      return layer.options[index];
+    }
+  }
+
+  return nullptr;
+}
+
+static String buildDpiPayload(const char *layerId, const char *optionId) {
+  String payload = DPI_PAYLOAD_PREFIX;
+  payload += layerId;
+  payload += DPI_PAYLOAD_OPTION_MARKER;
+  payload += optionId;
+  return payload;
+}
+
+static void printWriteFail(const char *tagId, const char *reason) {
+  Serial.print("WRITE_FAIL:");
+  Serial.print(tagId);
+  Serial.print(":");
+  Serial.println(reason);
+}
+
+static void printTagUnsupported(const NfcReaderState &readerState, const String &uidText, uint8_t uidLength) {
+  Serial.print("TAG_UNSUPPORTED:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.print(uidText);
+  Serial.print(":uid-length-");
+  Serial.println(uidLength);
+}
+
+static void printLayerSelection(const EncoderState &encoder) {
+  const LayerSpec *layer = findLayer(encoder.layerId);
+  if (!layer) return;
+
+  Serial.print("LAYER:");
+  Serial.print(layer->id);
+  Serial.print(":");
+  Serial.println(layer->options[encoder.optionIndex]);
+}
+
+static void moveLayerOption(EncoderState &encoder, int8_t direction) {
+  if (direction > 0) {
+    encoder.optionIndex = (encoder.optionIndex + 1) % 3;
+    Serial.print("ENC:");
+    Serial.print(encoder.layerId);
+    Serial.println(":+1");
+  } else {
+    encoder.optionIndex = (encoder.optionIndex + 2) % 3;
+    Serial.print("ENC:");
+    Serial.print(encoder.layerId);
+    Serial.println(":-1");
+  }
+
+  printLayerSelection(encoder);
+}
+
+static void readEncoders() {
+  for (size_t index = 0; index < ENCODER_COUNT; index++) {
+    EncoderState &encoder = encoders[index];
+    const uint8_t currentState = readEncoderState(encoder);
+    const uint8_t transition = (encoder.lastState << 2) | currentState;
+    const int8_t movement = QUADRATURE_TABLE[transition];
+
+    if (movement != 0) {
+      encoder.accumulator += movement;
+
+      if (encoder.accumulator >= 4) {
+        encoder.accumulator = 0;
+        moveLayerOption(encoder, 1);
+      } else if (encoder.accumulator <= -4) {
+        encoder.accumulator = 0;
+        moveLayerOption(encoder, -1);
+      }
+    }
+
+    encoder.lastState = currentState;
+
+    const bool buttonPressed = digitalRead(encoder.swPin) == LOW;
+    const uint32_t now = millis();
+
+    if (buttonPressed != encoder.lastButtonPressed && now - encoder.lastButtonChangeMs >= BUTTON_DEBOUNCE_MS) {
+      encoder.lastButtonPressed = buttonPressed;
+      encoder.lastButtonChangeMs = now;
+
+      if (buttonPressed) {
+        Serial.print("BUTTON:");
+        Serial.print(encoder.layerId);
+        Serial.println(":PRESS");
+      }
+    }
+  }
+}
 
 static String uidToHex(const uint8_t *uid, uint8_t uidLength) {
-  String out;
-  for (uint8_t i = 0; i < uidLength; i++) {
-    if (uid[i] < 0x10) {
-      out += '0';
+  String output;
+
+  for (uint8_t index = 0; index < uidLength; index++) {
+    if (uid[index] < 0x10) {
+      output += '0';
     }
-    out += String(uid[i], HEX);
-    if (i + 1 < uidLength) {
-      out += ':';
-    }
-  }
-  out.toUpperCase();
-  return out;
-}
 
-static const char *tagFamily(uint8_t uidLength) {
-  switch (uidLength) {
-    case 4:
-      return "MIFARE Classic / 4-byte ISO14443A";
-    case 7:
-      return "MIFARE Ultralight / NTAG / 7-byte ISO14443A";
-    case 10:
-      return "10-byte ISO14443A";
-    default:
-      return "ISO14443A";
-  }
-}
+    output += String(uid[index], HEX);
 
-static void scanI2CBus() {
-  Serial.println("Scanning I2C bus...");
-  bool foundDevice = false;
-
-  for (uint8_t address = 1; address < 127; address++) {
-    Wire.beginTransmission(address);
-    if (Wire.endTransmission() == 0) {
-      foundDevice = true;
-      Serial.print("  Found I2C device at 0x");
-      if (address < 0x10) {
-        Serial.print('0');
-      }
-      Serial.println(address, HEX);
+    if (index + 1 < uidLength) {
+      output += ':';
     }
   }
 
-  if (!foundDevice) {
-    Serial.println("  No I2C devices found.");
-  }
+  output.toUpperCase();
+  return output;
 }
 
-static bool startReader(Adafruit_PN532 &reader, const char *portName) {
-  Serial.print("Trying PN532 on ");
-  Serial.println(portName);
-
-  if (!reader.begin()) {
-    Serial.println("  PN532 begin failed.");
+static bool parseDpiPayload(const String &payload, const LayerSpec **layerOut, const char **optionOut) {
+  const int prefixLength = strlen(DPI_PAYLOAD_PREFIX);
+  if (!payload.startsWith(DPI_PAYLOAD_PREFIX)) {
     return false;
   }
 
-  uint32_t versionData = reader.getFirmwareVersion();
-  if (!versionData) {
-    Serial.println("  No PN532 response.");
+  const int optionMarker = payload.indexOf(DPI_PAYLOAD_OPTION_MARKER, prefixLength);
+  if (optionMarker < 0) {
     return false;
   }
 
-  Serial.print("Found PN5");
-  Serial.print((versionData >> 24) & 0xFF, HEX);
-  Serial.print(" firmware ");
-  Serial.print((versionData >> 16) & 0xFF, DEC);
-  Serial.print('.');
-  Serial.println((versionData >> 8) & 0xFF, DEC);
+  const int optionStart = optionMarker + strlen(DPI_PAYLOAD_OPTION_MARKER);
+  const String layerId = payload.substring(prefixLength, optionMarker);
+  const String optionId = payload.substring(optionStart);
+  const LayerSpec *layer = findLayer(layerId.c_str());
+  if (!layer) {
+    return false;
+  }
 
-  reader.SAMConfig();
-  reader.setPassiveActivationRetries(0x10);
-  nfc = &reader;
-  readerPort = portName;
+  const char *option = findLayerOption(*layer, optionId.c_str());
+  if (!option) {
+    return false;
+  }
+
+  *layerOut = layer;
+  *optionOut = option;
   return true;
 }
 
-static bool startUARTReader(int8_t rxPin, int8_t txPin, const char *portName) {
-  pn532Serial.end();
-  delay(50);
-  pn532Serial.setPins(rxPin, txPin);
-  pn532Serial.begin(115200, SERIAL_8N1, rxPin, txPin);
-  delay(100);
-  return startReader(nfcUART, portName);
+static bool parseNdefUriRecord(const uint8_t *message, uint16_t messageLength, String &payload) {
+  if (messageLength < 5) {
+    return false;
+  }
+
+  const uint8_t header = message[0];
+  const bool shortRecord = (header & 0x10) != 0;
+  const bool hasIdLength = (header & 0x08) != 0;
+  const uint8_t typeNameFormat = header & 0x07;
+  uint32_t uriPayloadLength = 0;
+  uint16_t cursor = 0;
+
+  if (typeNameFormat != 0x01) {
+    return false;
+  }
+
+  const uint8_t typeLength = message[1];
+  if (shortRecord) {
+    uriPayloadLength = message[2];
+    cursor = 3;
+  } else {
+    if (messageLength < 7) {
+      return false;
+    }
+
+    uriPayloadLength = ((uint32_t)message[2] << 24) |
+                       ((uint32_t)message[3] << 16) |
+                       ((uint32_t)message[4] << 8) |
+                       message[5];
+    cursor = 6;
+  }
+
+  uint8_t idLength = 0;
+  if (hasIdLength) {
+    if (cursor >= messageLength) {
+      return false;
+    }
+
+    idLength = message[cursor++];
+  }
+
+  if (uriPayloadLength < 1 || uriPayloadLength > UINT16_MAX) {
+    return false;
+  }
+
+  if ((uint32_t)cursor + typeLength + idLength + uriPayloadLength > messageLength) {
+    return false;
+  }
+
+  if (typeLength != 1 || message[cursor] != 0x55) {
+    return false;
+  }
+
+  cursor += typeLength + idLength;
+  const uint8_t uriPrefix = message[cursor++];
+  if (uriPrefix != NDEF_URIPREFIX_NONE) {
+    return false;
+  }
+
+  payload = "";
+  payload.reserve(uriPayloadLength - 1);
+  for (uint32_t index = 1; index < uriPayloadLength; index++) {
+    const char nextChar = (char)message[cursor++];
+    if (nextChar < 32 || nextChar > 126) {
+      return false;
+    }
+
+    payload += nextChar;
+  }
+
+  return payload.startsWith(DPI_PAYLOAD_PREFIX);
 }
 
-static bool tryAllReaderPorts() {
-  scanI2CBus();
-
-  if (startReader(nfcI2C, "Grove I2C port (PN532 I2C mode, address 0x24)")) {
-    return true;
+static bool readDpiPayloadFromNtag(Adafruit_PN532 &reader, String &payload) {
+  uint8_t cc[4] = {0};
+  if (!reader.ntag2xx_ReadPage(3, cc)) {
+    return false;
   }
 
-  if (startUARTReader(PN532_UART_RX, PN532_UART_TX,
-                      "Grove UART port (RX=D7/GPIO17, TX=D6/GPIO16)")) {
-    return true;
+  if (cc[0] != 0xE1 || (cc[1] & 0xF0) != 0x10) {
+    return false;
   }
 
-  return startUARTReader(PN532_UART_TX, PN532_UART_RX,
-                         "Grove UART port with swapped pins (RX=D6/GPIO16, TX=D7/GPIO17)");
+  uint16_t dataLength = (uint16_t)cc[2] * 8;
+  if (dataLength == 0) {
+    return false;
+  }
+
+  if (dataLength > NDEF_READ_LIMIT) {
+    dataLength = NDEF_READ_LIMIT;
+  }
+
+  uint8_t data[NDEF_READ_LIMIT] = {0};
+  for (uint16_t offset = 0; offset < dataLength; offset += 4) {
+    uint8_t page[4] = {0};
+    if (!reader.ntag2xx_ReadPage(4 + (offset / 4), page)) {
+      return false;
+    }
+
+    const uint8_t bytesToCopy = min((uint16_t)4, (uint16_t)(dataLength - offset));
+    memcpy(data + offset, page, bytesToCopy);
+  }
+
+  uint16_t cursor = 0;
+  while (cursor < dataLength) {
+    const uint8_t tlvType = data[cursor++];
+    if (tlvType == 0x00) {
+      continue;
+    }
+
+    if (tlvType == 0xFE) {
+      break;
+    }
+
+    if (cursor >= dataLength) {
+      break;
+    }
+
+    uint16_t tlvLength = data[cursor++];
+    if (tlvLength == 0xFF) {
+      if (cursor + 1 >= dataLength) {
+        break;
+      }
+
+      tlvLength = ((uint16_t)data[cursor] << 8) | data[cursor + 1];
+      cursor += 2;
+    }
+
+    if (cursor + tlvLength > dataLength) {
+      break;
+    }
+
+    if (tlvType == 0x03 && parseNdefUriRecord(data + cursor, tlvLength, payload)) {
+      return true;
+    }
+
+    cursor += tlvLength;
+  }
+
+  return false;
+}
+
+static void printReadCard(const NfcReaderState &readerState, const String &uidText, const String &payload) {
+  const LayerSpec *layer = nullptr;
+  const char *option = nullptr;
+  if (!parseDpiPayload(payload, &layer, &option)) {
+    return;
+  }
+
+  Serial.print("READ_CARD:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.print(uidText);
+  Serial.print(":");
+  Serial.print(layer->id);
+  Serial.print(":");
+  Serial.print(option);
+  Serial.print(":");
+  Serial.println(payload);
+}
+
+static bool readNtagDataLength(Adafruit_PN532 &reader, uint16_t &dataLength) {
+  uint8_t cc[4] = {0};
+  if (!reader.ntag2xx_ReadPage(3, cc)) {
+    return false;
+  }
+
+  if (cc[0] != 0xE1 || (cc[1] & 0xF0) != 0x10) {
+    return false;
+  }
+
+  dataLength = (uint16_t)cc[2] * 8;
+  return dataLength > 0;
+}
+
+static bool waitForCardOnReader(NfcReaderState &readerState, uint8_t *uid, uint8_t *uidLength) {
+  const uint32_t startMs = millis();
+
+  while (millis() - startMs < NFC_WRITE_TIMEOUT_MS) {
+    deselectAllNfcReaders();
+
+    if (readerState.reader->readPassiveTargetID(
+            PN532_MIFARE_ISO14443A,
+            uid,
+            uidLength,
+            NFC_WRITE_READ_TIMEOUT_MS)) {
+      return true;
+    }
+
+    readEncoders();
+    delay(5);
+  }
+
+  return false;
+}
+
+static void writeDpiPayloadToTag(NfcReaderState &readerState, const LayerSpec &layer, const char *optionId) {
+  if (!readerState.ready) {
+    readerState.ready = startNfcReader(readerState);
+    if (!readerState.ready) {
+      printWriteFail(readerState.tagId, "reader-not-ready");
+      return;
+    }
+  }
+
+  const String payload = buildDpiPayload(layer.id, optionId);
+  if (payload.length() >= DPI_PAYLOAD_LIMIT) {
+    printWriteFail(readerState.tagId, "payload-too-long");
+    return;
+  }
+
+  Serial.print("WRITE_READY:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.println(payload);
+
+  uint8_t uid[10] = {0};
+  uint8_t uidLength = 0;
+  if (!waitForCardOnReader(readerState, uid, &uidLength)) {
+    printWriteFail(readerState.tagId, "no-card");
+    return;
+  }
+
+  const String uidText = uidToHex(uid, uidLength);
+  if (uidLength != 7) {
+    printTagUnsupported(readerState, uidText, uidLength);
+    printWriteFail(readerState.tagId, "uid-length-not-7");
+    return;
+  }
+
+  uint16_t dataLength = 0;
+  if (!readNtagDataLength(*readerState.reader, dataLength)) {
+    printWriteFail(readerState.tagId, "ndef-capability-missing");
+    return;
+  }
+
+  const uint8_t writeDataLength = dataLength > 240 ? 240 : (uint8_t)dataLength;
+  if (payload.length() + 13 > writeDataLength) {
+    printWriteFail(readerState.tagId, "payload-too-large");
+    return;
+  }
+
+  char uriBuffer[DPI_PAYLOAD_LIMIT] = {0};
+  payload.toCharArray(uriBuffer, sizeof(uriBuffer));
+
+  if (!readerState.reader->ntag2xx_WriteNDEFURI(NDEF_URIPREFIX_NONE, uriBuffer, writeDataLength)) {
+    printWriteFail(readerState.tagId, "write-error");
+    return;
+  }
+
+  delay(30);
+  String verifiedPayload;
+  if (!readDpiPayloadFromNtag(*readerState.reader, verifiedPayload)) {
+    printWriteFail(readerState.tagId, "verify-read-failed");
+    return;
+  }
+
+  if (verifiedPayload != payload) {
+    printWriteFail(readerState.tagId, "verify-mismatch");
+    return;
+  }
+
+  readerState.lastUid = uidText;
+  readerState.lastSeenMs = millis();
+
+  Serial.print("WRITE_SUCCESS:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.print(uidText);
+  Serial.print(":");
+  Serial.print(layer.id);
+  Serial.print(":");
+  Serial.println(optionId);
+}
+
+static void handleWriteCommand(const String &command) {
+  const int firstSeparator = command.indexOf(':');
+  const int secondSeparator = command.indexOf(':', firstSeparator + 1);
+  const int thirdSeparator = command.indexOf(':', secondSeparator + 1);
+
+  if (firstSeparator < 0 || secondSeparator < 0 || thirdSeparator < 0) {
+    printWriteFail("unknown", "bad-command");
+    return;
+  }
+
+  const String tagId = command.substring(firstSeparator + 1, secondSeparator);
+  const String layerId = command.substring(secondSeparator + 1, thirdSeparator);
+  const String optionId = command.substring(thirdSeparator + 1);
+
+  if (tagId.length() == 0 || layerId.length() == 0 || optionId.length() == 0) {
+    printWriteFail(tagId.length() ? tagId.c_str() : "unknown", "empty-field");
+    return;
+  }
+
+  NfcReaderState *readerState = findNfcReader(tagId.c_str());
+  if (!readerState) {
+    printWriteFail(tagId.c_str(), "unknown-tag");
+    return;
+  }
+
+  const LayerSpec *layer = findLayer(layerId.c_str());
+  if (!layer) {
+    printWriteFail(readerState->tagId, "unknown-layer");
+    return;
+  }
+
+  const char *option = findLayerOption(*layer, optionId.c_str());
+  if (!option) {
+    printWriteFail(readerState->tagId, "unknown-option");
+    return;
+  }
+
+  writeDpiPayloadToTag(*readerState, *layer, option);
+}
+
+static void handleSerialCommand(const String &command) {
+  if (command.length() == 0) {
+    return;
+  }
+
+  if (command.startsWith("WRITE:")) {
+    handleWriteCommand(command);
+  }
+}
+
+static void readSerialCommands() {
+  while (Serial.available()) {
+    const char nextChar = (char)Serial.read();
+
+    if (nextChar == '\r') {
+      continue;
+    }
+
+    if (nextChar == '\n') {
+      handleSerialCommand(serialCommand);
+      serialCommand = "";
+      continue;
+    }
+
+    if (serialCommand.length() >= SERIAL_COMMAND_LIMIT) {
+      serialCommand = "";
+      printWriteFail("unknown", "command-too-long");
+      continue;
+    }
+
+    serialCommand += nextChar;
+  }
+}
+
+static void deselectAllNfcReaders() {
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    digitalWrite(nfcReaders[index].csPin, HIGH);
+  }
+}
+
+static bool startNfcReader(NfcReaderState &readerState) {
+  deselectAllNfcReaders();
+
+  Serial.print("PN532 ");
+  Serial.print(readerState.tagId);
+  Serial.print(" ");
+  Serial.print(readerState.label);
+  Serial.print(": trying SPI CS GPIO");
+  Serial.println(readerState.csPin);
+
+  if (!readerState.reader->begin()) {
+    Serial.println("  begin failed");
+    return false;
+  }
+
+  const uint32_t versionData = readerState.reader->getFirmwareVersion();
+  if (!versionData) {
+    Serial.println("  no response");
+    return false;
+  }
+
+  Serial.print("  found PN5");
+  Serial.print((versionData >> 24) & 0xFF, HEX);
+  Serial.print(" firmware ");
+  Serial.print((versionData >> 16) & 0xFF, DEC);
+  Serial.print(".");
+  Serial.println((versionData >> 8) & 0xFF, DEC);
+
+  readerState.reader->SAMConfig();
+  readerState.reader->setPassiveActivationRetries(0x08);
+  return true;
+}
+
+static void startNfcReaders() {
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    nfcReaders[index].ready = startNfcReader(nfcReaders[index]);
+  }
+}
+
+static void readNfcReader(NfcReaderState &readerState) {
+  if (!readerState.ready) {
+    if (millis() - readerState.lastRetryMs >= NFC_RETRY_WINDOW_MS) {
+      readerState.lastRetryMs = millis();
+      readerState.ready = startNfcReader(readerState);
+    }
+
+    return;
+  }
+
+  deselectAllNfcReaders();
+
+  uint8_t uid[10] = {0};
+  uint8_t uidLength = 0;
+  const bool found = readerState.reader->readPassiveTargetID(
+      PN532_MIFARE_ISO14443A,
+      uid,
+      &uidLength,
+      NFC_READ_TIMEOUT_MS);
+
+  if (!found) return;
+
+  const String uidText = uidToHex(uid, uidLength);
+  const uint32_t now = millis();
+
+  if (uidText == readerState.lastUid && now - readerState.lastSeenMs < NFC_REPEAT_WINDOW_MS) {
+    return;
+  }
+
+  readerState.lastUid = uidText;
+  readerState.lastSeenMs = now;
+
+  Serial.print("TAG:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.println(uidText);
+
+  Serial.print("READER:");
+  Serial.print(readerState.layerId);
+  Serial.print(":");
+  Serial.println(uidText);
+
+  if (uidLength != 7) {
+    printTagUnsupported(readerState, uidText, uidLength);
+    return;
+  }
+
+  String payload;
+  if (readDpiPayloadFromNtag(*readerState.reader, payload)) {
+    printReadCard(readerState, uidText, payload);
+  }
+}
+
+static void readNfcReaders() {
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    readNfcReader(nfcReaders[index]);
+  }
 }
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial && millis() < 3000) {
+  Serial.begin(SERIAL_BAUD);
+  while (!Serial && millis() < 2500) {
     delay(10);
   }
 
   Serial.println();
-  Serial.println("XIAO ESP32-C6 + PN532 NFC reader");
-  Serial.println("Bring an NFC tag near the PN532 to print its UID.");
-  Serial.println("I2C Grove port: SDA=D4/GPIO22, SCL=D5/GPIO23.");
-  Serial.println("UART Grove port: XIAO RX=D7/GPIO17, TX=D6/GPIO16.");
+  Serial.println("DPI ESP32 layer controller");
+  Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
+  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG:<tagId>:<uid>, WRITE:<tagId>:<layerId>:<optionId>");
 
-  Wire.begin(SDA, SCL);
-  Wire.setClock(100000);
-  tryAllReaderPorts();
-
-  if (nfc == nullptr) {
-    Serial.println();
-    Serial.println("Didn't find a PN532.");
-    Serial.println("Use the I2C/IIC Grove socket if the PN532 is switched to I2C mode.");
-    Serial.println("Use the UART Grove socket if the PN532 is still in its default UART mode.");
-    Serial.println("For I2C, the PN532 should show up at address 0x24.");
-    Serial.println("I will keep retrying every 3 seconds.");
-    return;
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    pinMode(nfcReaders[index].csPin, OUTPUT);
+    digitalWrite(nfcReaders[index].csPin, HIGH);
   }
 
-  Serial.print("Ready for NFC tags on ");
-  Serial.println(readerPort);
+  for (size_t index = 0; index < ENCODER_COUNT; index++) {
+    EncoderState &encoder = encoders[index];
+
+    pinMode(encoder.clkPin, supportsInternalPullup(encoder.clkPin) ? INPUT_PULLUP : INPUT);
+    pinMode(encoder.dtPin, supportsInternalPullup(encoder.dtPin) ? INPUT_PULLUP : INPUT);
+    pinMode(encoder.swPin, INPUT_PULLUP);
+    encoder.lastState = readEncoderState(encoder);
+    encoder.lastButtonPressed = digitalRead(encoder.swPin) == LOW;
+
+    Serial.print("Encoder ");
+    Serial.print(encoder.label);
+    Serial.print(": CLK GPIO");
+    Serial.print(encoder.clkPin);
+    Serial.print(", DT GPIO");
+    Serial.print(encoder.dtPin);
+    Serial.print(", SW GPIO");
+    Serial.println(encoder.swPin);
+  }
+
+  startNfcReaders();
+  Serial.println("Ready.");
 }
 
 void loop() {
-  if (nfc == nullptr) {
-    if (millis() - lastReaderRetryMs >= 3000) {
-      lastReaderRetryMs = millis();
-      Serial.println();
-      Serial.println("Retrying PN532 detection...");
-      if (tryAllReaderPorts()) {
-        Serial.print("Ready for NFC tags on ");
-        Serial.println(readerPort);
-      }
-    }
-    delay(50);
-    return;
-  }
-
-  uint8_t uid[10] = {0};
-  uint8_t uidLength = 0;
-
-  bool tagFound = nfc->readPassiveTargetID(
-      PN532_MIFARE_ISO14443A,
-      uid,
-      &uidLength,
-      250);
-
-  if (tagFound) {
-    Serial.println();
-    Serial.println("NFC tag recognized");
-    Serial.print("  Type: ");
-    Serial.println(tagFamily(uidLength));
-    Serial.print("  UID length: ");
-    Serial.print(uidLength);
-    Serial.println(" bytes");
-    Serial.print("  UID: ");
-    Serial.println(uidToHex(uid, uidLength));
-
-    while (nfc->readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 250)) {
-      delay(100);
-    }
-    Serial.println("Tag removed. Ready for another tag.");
-  }
-
-  delay(50);
+  readSerialCommands();
+  readEncoders();
+  readNfcReaders();
+  delay(2);
 }

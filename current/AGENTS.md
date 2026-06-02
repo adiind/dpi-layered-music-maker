@@ -1,0 +1,31 @@
+## Codex
+- Flashed the tuned ESP32 PN532 firmware with longer NTAG215 polling windows after a manual BOOT upload.
+- Tuned ESP32 PN532 polling for phone-verified NTAG215 stickers by increasing read/write tag detection windows and passive activation retries.
+- Added explicit NFC card diagnostics with UID, unassigned/DPI-assigned/unsupported states, card memory payload, and clearer reader-card status labels.
+- Added a numbered PN532 reader health strip in NFC Studio that shows initialization, no-response, detected, and NFC-read glow states for readers 1-5.
+- Added the true NFC write workflow with a guided Studio wizard, two-way Web Serial commands, NTAG NDEF write/verify firmware, and updated hardware docs.
+- Reworked NFC Studio into an explicit reader-slot workflow with assign/read/test states, hardware activity, and serial feed visibility.
+- Flashed the five-reader/five-encoder ESP32 firmware to `/dev/cu.usbserial-0001` after stopping a stale serial LaunchAgent.
+- Boosted the quiet third stem options, especially Drum w Duck, Ethereal Echo Thing, Bouncy Synth Chords, and Piano 3.
+- Reworked the ESP32 hardware plan for five PN532 readers plus five encoders using shared SPI and per-reader CS lines.
+- Added the ESP32 38-pin hardware controller firmware, real Web Serial parsing for layer/tag events, and a wiring diagram for five KY-040 encoders plus a PN532 reader.
+- Added the NFC Studio tab with persistent app-level tag assignments, exact Test Tag routing into Mix, and responsive programming UI.
+- Built the final five-channel DPI Layer Mixer demo with compressed stem audio, a sample-backed Tone.js engine, stack visualizer UI, and mock ESP32/NFC controls.
+- Packaged the saved build and shape/color fork into the public GitHub repo adiind/dpi-layered-music-maker.
+- Increased the impact of the first two bass options with stronger gains, extra rhythmic hits, and more audible sub attack.
+- Rebalanced the composed engine defaults so rhythm and bass start lower while harmony and melody start much more present.
+- Replaced Audacity-stem playback with a from-scratch Tone.js composed engine using distinct rhythm, harmony, bass, and melody options on a shared 120 BPM grid.
+- Removed the unused generated synth engine/files and relabeled the app as Audacity-stems-only.
+- Integrated the Audacity .aup3 arrangement as the synced sample source with extracted stems, manifest data, and a Tone.js stem playback engine.
+- Reworked the music into a simpler song-like 4-bar loop with lower chord voicings, sparser melody, gentler percussion, and softer synth timbres.
+- Improved the generated music with a fuller Tone.js effects chain, more distinct instrument timbres, and more audible layer option patterns.
+- Made NFC feedback clearer by guaranteeing hardware taps choose a different audible layer option and showing before/after changes in the Composition panel.
+- Made NFC touches behave as visible randomizer events and added clearer NFC status/last-input feedback.
+- Built the clean React/Tone LAYR web app with selectable four-layer playback, randomize, mute/volume, composition view, and mock NFC cards/keyboard.
+- Wired the app UI to the Web Serial PN532 adapter so scanned UID lines can select layer options through the same input event path.
+- Improved the Tone.js runtime with precomputed 64-step pattern grids, safer start/stop/dispose lifecycle, and next-bar selection commits.
+- Added a Web Serial NFC hardware input adapter that parses PN532 UID lines and maps tags into layer option events.
+- Added and flashed a UART swapped-pin fallback; PN532 was detected on RX=D6/GPIO16 and TX=D7/GPIO17.
+- Flashed final dual-mode PN532 firmware that retries Grove I2C and Grove UART with serial diagnostics.
+- Flashed the XIAO ESP32-C6 with the Grove I2C PN532 NFC tag reader sketch.
+- Added an Arduino sketch that scans I2C, initializes the PN532, and prints recognized tag UIDs.

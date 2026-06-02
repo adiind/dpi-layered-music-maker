@@ -309,7 +309,7 @@ export const CompositionView = ({
             <>
               <span>Input</span>
               <strong>Ready</strong>
-              <em>Keys 1-5 and mock NFC tags cycle layer options.</em>
+              <em>Keys 1-5 cycle options; programmed NFC tags apply exact assignments.</em>
             </>
           )}
         </div>
