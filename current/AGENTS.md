@@ -1,4 +1,5 @@
 ## Codex
+- Added retrying, as-needed NTAG NDEF readback diagnostics so write verification reports the failing page or parser condition.
 - Flashed the ESP32 firmware with page-by-page NTAG NDEF writing and retrying readback verification.
 - Reworked ESP32 NTAG writing to emit the DPI NDEF URI page-by-page and retry readback verification after card reselection.
 - Pushed the updated NFC Studio, ESP32 firmware, and hardware docs snapshot to GitHub PR #1 on `codex/final-demo-visualizer`.

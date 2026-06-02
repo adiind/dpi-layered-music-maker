@@ -105,6 +105,7 @@ constexpr size_t ENCODER_COUNT = sizeof(encoders) / sizeof(encoders[0]);
 constexpr size_t NFC_READER_COUNT = sizeof(nfcReaders) / sizeof(nfcReaders[0]);
 
 String serialCommand;
+String lastNtagReadError;
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -167,6 +168,13 @@ static void printWriteFail(const char *tagId, const char *reason) {
   Serial.print(tagId);
   Serial.print(":");
   Serial.println(reason);
+}
+
+static void printWriteDebug(const char *tagId, const String &message) {
+  Serial.print("WRITE_DEBUG:");
+  Serial.print(tagId);
+  Serial.print(":");
+  Serial.println(message);
 }
 
 static void printTagUnsupported(const NfcReaderState &readerState, const String &uidText, uint8_t uidLength) {
@@ -362,18 +370,37 @@ static bool parseNdefUriRecord(const uint8_t *message, uint16_t messageLength, S
   return payload.startsWith(DPI_PAYLOAD_PREFIX);
 }
 
+static bool readNtagPageWithRetry(Adafruit_PN532 &reader, uint8_t pageNumber, uint8_t *page) {
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    if (reader.ntag2xx_ReadPage(pageNumber, page)) {
+      return true;
+    }
+
+    delay(20);
+  }
+
+  lastNtagReadError = "page-read-failed-";
+  lastNtagReadError += pageNumber;
+  return false;
+}
+
 static bool readDpiPayloadFromNtag(Adafruit_PN532 &reader, String &payload) {
+  payload = "";
+  lastNtagReadError = "";
+
   uint8_t cc[4] = {0};
-  if (!reader.ntag2xx_ReadPage(3, cc)) {
+  if (!readNtagPageWithRetry(reader, 3, cc)) {
     return false;
   }
 
   if (cc[0] != 0xE1 || (cc[1] & 0xF0) != 0x10) {
+    lastNtagReadError = "ndef-capability-missing";
     return false;
   }
 
   uint16_t dataLength = (uint16_t)cc[2] * 8;
   if (dataLength == 0) {
+    lastNtagReadError = "ndef-data-length-zero";
     return false;
   }
 
@@ -382,52 +409,72 @@ static bool readDpiPayloadFromNtag(Adafruit_PN532 &reader, String &payload) {
   }
 
   uint8_t data[NDEF_READ_LIMIT] = {0};
-  for (uint16_t offset = 0; offset < dataLength; offset += 4) {
-    uint8_t page[4] = {0};
-    if (!reader.ntag2xx_ReadPage(4 + (offset / 4), page)) {
-      return false;
+  uint16_t loaded = 0;
+  uint16_t needed = 8;
+
+  while (loaded < dataLength) {
+    while (loaded < needed && loaded < dataLength) {
+      uint8_t page[4] = {0};
+      const uint8_t pageNumber = 4 + (loaded / 4);
+      if (!readNtagPageWithRetry(reader, pageNumber, page)) {
+        return false;
+      }
+
+      const uint8_t bytesToCopy = min((uint16_t)4, (uint16_t)(dataLength - loaded));
+      memcpy(data + loaded, page, bytesToCopy);
+      loaded += bytesToCopy;
     }
 
-    const uint8_t bytesToCopy = min((uint16_t)4, (uint16_t)(dataLength - offset));
-    memcpy(data + offset, page, bytesToCopy);
-  }
+    uint16_t cursor = 0;
+    bool needsMoreBytes = false;
+    while (cursor < loaded) {
+      const uint8_t tlvType = data[cursor++];
+      if (tlvType == 0x00) {
+        continue;
+      }
 
-  uint16_t cursor = 0;
-  while (cursor < dataLength) {
-    const uint8_t tlvType = data[cursor++];
-    if (tlvType == 0x00) {
-      continue;
-    }
+      if (tlvType == 0xFE) {
+        lastNtagReadError = "ndef-terminator-before-dpi-payload";
+        return false;
+      }
 
-    if (tlvType == 0xFE) {
-      break;
-    }
-
-    if (cursor >= dataLength) {
-      break;
-    }
-
-    uint16_t tlvLength = data[cursor++];
-    if (tlvLength == 0xFF) {
-      if (cursor + 1 >= dataLength) {
+      if (cursor >= loaded) {
+        needed = min((uint16_t)(loaded + 4), dataLength);
+        needsMoreBytes = true;
         break;
       }
 
-      tlvLength = ((uint16_t)data[cursor] << 8) | data[cursor + 1];
-      cursor += 2;
+      uint16_t tlvLength = data[cursor++];
+      if (tlvLength == 0xFF) {
+        if (cursor + 1 >= loaded) {
+          needed = min((uint16_t)(loaded + 4), dataLength);
+          needsMoreBytes = true;
+          break;
+        }
+
+        tlvLength = ((uint16_t)data[cursor] << 8) | data[cursor + 1];
+        cursor += 2;
+      }
+
+      if (cursor + tlvLength > loaded) {
+        needed = min((uint16_t)(cursor + tlvLength), dataLength);
+        needsMoreBytes = true;
+        break;
+      }
+
+      if (tlvType == 0x03 && parseNdefUriRecord(data + cursor, tlvLength, payload)) {
+        return true;
+      }
+
+      cursor += tlvLength;
     }
 
-    if (cursor + tlvLength > dataLength) {
+    if (!needsMoreBytes) {
       break;
     }
-
-    if (tlvType == 0x03 && parseNdefUriRecord(data + cursor, tlvLength, payload)) {
-      return true;
-    }
-
-    cursor += tlvLength;
   }
 
+  lastNtagReadError = "dpi-payload-not-found";
   return false;
 }
 
@@ -452,7 +499,7 @@ static void printReadCard(const NfcReaderState &readerState, const String &uidTe
 
 static bool readNtagDataLength(Adafruit_PN532 &reader, uint16_t &dataLength) {
   uint8_t cc[4] = {0};
-  if (!reader.ntag2xx_ReadPage(3, cc)) {
+  if (!readNtagPageWithRetry(reader, 3, cc)) {
     return false;
   }
 
@@ -501,6 +548,8 @@ static bool writeDpiPayloadAsNdef(Adafruit_PN532 &reader, const String &payload,
     if (!reader.ntag2xx_WritePage(4 + pageOffset, page)) {
       return false;
     }
+
+    delay(12);
   }
 
   return true;
@@ -600,6 +649,11 @@ static void writeDpiPayloadToTag(NfcReaderState &readerState, const LayerSpec &l
   delay(80);
   String verifiedPayload;
   if (!verifyDpiPayloadOnTag(readerState, payload, verifiedPayload)) {
+    String reason = lastNtagReadError.length() > 0 ? lastNtagReadError : "readback-empty";
+    String debugMessage = "verify-";
+    debugMessage += reason;
+    printWriteDebug(readerState.tagId, debugMessage);
+
     if (verifiedPayload.length() > 0) {
       printWriteFail(readerState.tagId, "verify-mismatch");
       return;
