@@ -1,4 +1,5 @@
 ## Codex
+- Pushed the updated NFC Studio, ESP32 firmware, and hardware docs snapshot to GitHub PR #1 on `codex/final-demo-visualizer`.
 - Flashed the tuned ESP32 PN532 firmware with longer NTAG215 polling windows after a manual BOOT upload.
 - Tuned ESP32 PN532 polling for phone-verified NTAG215 stickers by increasing read/write tag detection windows and passive activation retries.
 - Added explicit NFC card diagnostics with UID, unassigned/DPI-assigned/unsupported states, card memory payload, and clearer reader-card status labels.
