@@ -464,6 +464,68 @@ static bool readNtagDataLength(Adafruit_PN532 &reader, uint16_t &dataLength) {
   return dataLength > 0;
 }
 
+static bool writeDpiPayloadAsNdef(Adafruit_PN532 &reader, const String &payload, uint16_t dataLength) {
+  const uint16_t uriLength = payload.length();
+  const uint16_t ndefLength = uriLength + 5;
+  const uint16_t tlvLength = ndefLength + 3;
+  if (uriLength == 0 || uriLength >= DPI_PAYLOAD_LIMIT || ndefLength > 254 || tlvLength > dataLength) {
+    return false;
+  }
+
+  uint8_t data[DPI_PAYLOAD_LIMIT + 8] = {0};
+  uint16_t cursor = 0;
+  data[cursor++] = 0x03;
+  data[cursor++] = (uint8_t)ndefLength;
+  data[cursor++] = 0xD1;
+  data[cursor++] = 0x01;
+  data[cursor++] = (uint8_t)(uriLength + 1);
+  data[cursor++] = 0x55;
+  data[cursor++] = NDEF_URIPREFIX_NONE;
+
+  for (uint16_t index = 0; index < uriLength; index++) {
+    data[cursor++] = (uint8_t)payload[index];
+  }
+
+  data[cursor++] = 0xFE;
+
+  const uint8_t pagesToWrite = (cursor + 3) / 4;
+  for (uint8_t pageOffset = 0; pageOffset < pagesToWrite; pageOffset++) {
+    uint8_t page[4] = {0};
+    for (uint8_t byteOffset = 0; byteOffset < 4; byteOffset++) {
+      const uint16_t dataIndex = (pageOffset * 4) + byteOffset;
+      if (dataIndex < cursor) {
+        page[byteOffset] = data[dataIndex];
+      }
+    }
+
+    if (!reader.ntag2xx_WritePage(4 + pageOffset, page)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool verifyDpiPayloadOnTag(NfcReaderState &readerState, const String &expectedPayload, String &verifiedPayload) {
+  for (uint8_t attempt = 0; attempt < 4; attempt++) {
+    uint8_t uid[10] = {0};
+    uint8_t uidLength = 0;
+    readerState.reader->readPassiveTargetID(
+        PN532_MIFARE_ISO14443A,
+        uid,
+        &uidLength,
+        NFC_WRITE_READ_TIMEOUT_MS);
+
+    if (readDpiPayloadFromNtag(*readerState.reader, verifiedPayload)) {
+      return verifiedPayload == expectedPayload;
+    }
+
+    delay(80);
+  }
+
+  return false;
+}
+
 static bool waitForCardOnReader(NfcReaderState &readerState, uint8_t *uid, uint8_t *uidLength) {
   const uint32_t startMs = millis();
 
@@ -525,29 +587,25 @@ static void writeDpiPayloadToTag(NfcReaderState &readerState, const LayerSpec &l
     return;
   }
 
-  const uint8_t writeDataLength = dataLength > 240 ? 240 : (uint8_t)dataLength;
-  if (payload.length() + 13 > writeDataLength) {
+  if (payload.length() + 8 > dataLength) {
     printWriteFail(readerState.tagId, "payload-too-large");
     return;
   }
 
-  char uriBuffer[DPI_PAYLOAD_LIMIT] = {0};
-  payload.toCharArray(uriBuffer, sizeof(uriBuffer));
-
-  if (!readerState.reader->ntag2xx_WriteNDEFURI(NDEF_URIPREFIX_NONE, uriBuffer, writeDataLength)) {
+  if (!writeDpiPayloadAsNdef(*readerState.reader, payload, dataLength)) {
     printWriteFail(readerState.tagId, "write-error");
     return;
   }
 
-  delay(30);
+  delay(80);
   String verifiedPayload;
-  if (!readDpiPayloadFromNtag(*readerState.reader, verifiedPayload)) {
-    printWriteFail(readerState.tagId, "verify-read-failed");
-    return;
-  }
+  if (!verifyDpiPayloadOnTag(readerState, payload, verifiedPayload)) {
+    if (verifiedPayload.length() > 0) {
+      printWriteFail(readerState.tagId, "verify-mismatch");
+      return;
+    }
 
-  if (verifiedPayload != payload) {
-    printWriteFail(readerState.tagId, "verify-mismatch");
+    printWriteFail(readerState.tagId, "verify-read-failed");
     return;
   }
 
