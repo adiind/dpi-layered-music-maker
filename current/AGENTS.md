@@ -1,4 +1,5 @@
 ## Codex
+- Flashed the ESP32 firmware with direct page-4 DPI NDEF verification fallback.
 - Added a direct page-4 DPI NDEF readback path so NTAG verification no longer depends on flaky page-3 capability reads.
 - Flashed the ESP32 firmware with retrying, as-needed NTAG NDEF readback diagnostics.
 - Added retrying, as-needed NTAG NDEF readback diagnostics so write verification reports the failing page or parser condition.
