@@ -15,7 +15,7 @@ interface TopBarProps {
 
 const loadingLabel = (status: EngineStatus) => {
   if (status.state === "ready") return "Ready";
-  if (status.state === "error") return status.message ?? "Audio error";
+  if (status.state === "error") return `Audio error: ${status.message ?? "stems failed to load"}`;
   if (status.state === "loading") return `${status.loadedCount}/${status.totalCount} stems`;
   return SOURCE_LABEL;
 };
@@ -39,7 +39,7 @@ export const TopBar = ({
       </button>
       <div>
         <h1>DPI Layer Mixer</h1>
-        <p>{loadingLabel(engineStatus)}</p>
+        <p className={engineStatus.state === "error" ? "status-error" : ""}>{loadingLabel(engineStatus)}</p>
       </div>
     </div>
 
@@ -48,7 +48,8 @@ export const TopBar = ({
         type="button"
         onClick={onTogglePlayback}
         disabled={isAudioStarting || engineStatus.state === "error"}
-        className="primary-transport"
+        className={`primary-transport${engineStatus.state === "error" ? " transport-error" : ""}`}
+        title={engineStatus.state === "error" ? (engineStatus.message ?? "Audio load failed — check browser console") : undefined}
       >
         {isPlaying ? <PauseIcon /> : <PlayIcon />}
         {isAudioStarting ? "Loading" : isPlaying ? "Stop" : "Play"}

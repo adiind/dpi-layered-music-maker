@@ -2,6 +2,16 @@
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_PN532.h>
 
+// Compile-time feature flags — set to 0 before flashing if hardware causes trouble.
+// NEOPIXEL_ENABLED 0: disables LED strip entirely (GPIO12 / MTDI strapping pin risk).
+// BUTTONS_ENABLED  0: disables encoder mute-toggle buttons; rotation still works.
+#ifndef NEOPIXEL_ENABLED
+#define NEOPIXEL_ENABLED 1
+#endif
+#ifndef BUTTONS_ENABLED
+#define BUTTONS_ENABLED 0
+#endif
+
 // DPI final demo controller for an ESP32-WROOM-32 / 38-pin dev board.
 // Hardware: 5x KY-040 rotary encoders and 5x PN532 readers in SPI mode.
 // Serial baud: 115200.
@@ -29,11 +39,11 @@
 //   TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint16_t NFC_READ_TIMEOUT_MS = 55;
+constexpr uint16_t NFC_READ_TIMEOUT_MS = 55;          // per-reader poll budget; short to keep round-robin responsive
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
-constexpr uint32_t NFC_REPEAT_WINDOW_MS = 650;
-constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1800;
-constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;
+constexpr uint32_t NFC_REPEAT_WINDOW_MS = 650;        // suppress duplicate TAG events for the same UID within this window
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1800;      // card must be continuously absent this long before TAG_REMOVED fires
+constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;         // minimum consecutive missed reads required before removal is considered
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -52,10 +62,14 @@ constexpr uint8_t PN532_MOSI = 23;
 
 constexpr uint8_t PN532_CS_FOUNDATION = 5;
 constexpr uint8_t PN532_CS_TEXTURE = 4;
-constexpr uint8_t PN532_CS_DRUMS = 15;
-constexpr uint8_t PN532_CS_KEYS = 2;
-constexpr uint8_t PN532_CS_SOLO = 0;
+constexpr uint8_t PN532_CS_DRUMS = 15;  // MTDO strapping pin — safe as OUTPUT after boot
+constexpr uint8_t PN532_CS_KEYS = 2;    // must be LOW during flash-programming; safe as OUTPUT after boot
+constexpr uint8_t PN532_CS_SOLO = 0;    // boot-mode strapping pin — drive OUTPUT+HIGH immediately in setup()
 
+// GPIO12 is MTDI (flash-voltage strapping pin). HIGH at reset selects 1.8V flash on
+// some ESP32 modules; use of the wrong voltage causes boot failure. NeoPixels idle LOW
+// so normal post-boot operation is safe. If LEDs cause brownout or boot trouble, set
+// NEOPIXEL_ENABLED 0 at the top of this file.
 constexpr uint8_t NEOPIXEL_PIN = 12;
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
@@ -261,6 +275,7 @@ static uint8_t scaleColor(uint8_t value, uint8_t volumePercent) {
   return ((uint16_t)value * scaledBrightness) / 255;
 }
 
+#if NEOPIXEL_ENABLED
 static uint8_t getNeoPixelPulsePercent() {
   const uint16_t phase = millis() % NEOPIXEL_BREATHE_PERIOD_MS;
   const uint16_t halfPeriod = NEOPIXEL_BREATHE_PERIOD_MS / 2;
@@ -277,8 +292,10 @@ static uint16_t getLayerNeoPixelIndex(size_t layerIndex, uint8_t pixelOffset) {
                                         : layerIndex;
   return (physicalLayerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
 }
+#endif
 
 static void renderNeoPixels() {
+#if NEOPIXEL_ENABLED
   const uint8_t pulsePercent = transportPlaying ? getNeoPixelPulsePercent() : 100;
 
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
@@ -321,9 +338,11 @@ static void renderNeoPixels() {
 
   layerPixels.show();
   lastNeoPixelFrameMs = millis();
+#endif
 }
 
 static void showNeoPixelSelfTest() {
+#if NEOPIXEL_ENABLED
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
     const uint8_t red = scaleColor(layer.red, NEOPIXEL_SELF_TEST_PERCENT);
@@ -341,9 +360,11 @@ static void showNeoPixelSelfTest() {
   layerPixels.show();
   delay(NEOPIXEL_SELF_TEST_MS);
   renderNeoPixels();
+#endif
 }
 
 static void updateNeoPixelAnimation() {
+#if NEOPIXEL_ENABLED
   if (!transportPlaying) {
     return;
   }
@@ -351,6 +372,7 @@ static void updateNeoPixelAnimation() {
   if (millis() - lastNeoPixelFrameMs >= NEOPIXEL_FRAME_MS) {
     renderNeoPixels();
   }
+#endif
 }
 
 static void setReaderLayerPresence(const NfcReaderState &readerState, bool present) {
@@ -546,6 +568,7 @@ static void readEncoders() {
       }
     }
 
+#if BUTTONS_ENABLED
     const bool buttonPressed = digitalRead(encoder.swPin) == LOW;
     const uint32_t now = millis();
 
@@ -560,6 +583,7 @@ static void readEncoders() {
         toggleLayerMuteFromEncoder(encoder);
       }
     }
+#endif
   }
 }
 
@@ -1345,20 +1369,14 @@ void setup() {
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
   Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>, LED:<tagId>:off|ok|bad, PLAY:0|1");
 
-  layerPixels.begin();
-  layerPixels.clear();
-  showNeoPixelSelfTest();
-  Serial.print("NeoPixel strip: DATA GPIO");
-  Serial.print(NEOPIXEL_PIN);
-  Serial.print(", LEDs ");
-  Serial.print(NEOPIXEL_COUNT);
-  Serial.print(", reverse layer order ");
-  Serial.println(NEOPIXEL_REVERSE_LAYER_ORDER ? "on" : "off");
-
+  // Drive NFC CS pins OUTPUT+HIGH first. GPIO0 (SOLO) and GPIO2 (KEYS) are ESP32
+  // strapping pins — getting them to a known driven state before any SPI or LED
+  // activity prevents floating-pin glitches during the boot window.
   for (size_t index = 0; index < NFC_READER_COUNT; index++) {
     pinMode(nfcReaders[index].csPin, OUTPUT);
     digitalWrite(nfcReaders[index].csPin, HIGH);
   }
+  Serial.println("NFC CS pins: all OUTPUT+HIGH");
 
   for (size_t index = 0; index < ENCODER_COUNT; index++) {
     EncoderState &encoder = encoders[index];
@@ -1385,6 +1403,32 @@ void setup() {
 
   attachEncoderInterrupts();
   Serial.println("Encoder interrupts attached.");
+
+  // NeoPixel init after CS pins are secured. GPIO12 (MTDI) idles LOW when not
+  // transmitting so normal post-boot use is safe. Set NEOPIXEL_ENABLED 0 if the
+  // LED strip causes brownout or boot failure (inrush current on 5V rail).
+  Serial.print("NeoPixel: GPIO");
+  Serial.print(NEOPIXEL_PIN);
+  Serial.print(", ");
+  Serial.print(NEOPIXEL_COUNT);
+  Serial.print(" LEDs, NEOPIXEL_ENABLED=");
+#if NEOPIXEL_ENABLED
+  Serial.print("1, reverse=");
+  Serial.println(NEOPIXEL_REVERSE_LAYER_ORDER ? "on" : "off");
+  layerPixels.begin();
+  layerPixels.clear();
+  showNeoPixelSelfTest();
+  Serial.println("NeoPixel self-test done.");
+#else
+  Serial.println("0 (strip disabled — set NEOPIXEL_ENABLED 1 to re-enable)");
+#endif
+
+  Serial.print("Buttons (encoder mute): BUTTONS_ENABLED=");
+#if BUTTONS_ENABLED
+  Serial.println("1");
+#else
+  Serial.println("0 (encoder presses ignored)");
+#endif
 
   startNfcReaders();
   Serial.println("Ready.");
