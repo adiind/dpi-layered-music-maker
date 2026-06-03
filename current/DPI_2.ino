@@ -96,18 +96,19 @@ struct EncoderState {
   uint8_t clkPin;
   uint8_t dtPin;
   uint8_t swPin;
-  uint8_t lastState;
-  int8_t accumulator;
+  volatile uint8_t lastState;
+  volatile int8_t accumulator;
+  volatile int16_t pendingSteps;
   bool lastButtonPressed;
   uint32_t lastButtonChangeMs;
 };
 
 EncoderState encoders[] = {
-    {"foundation", "Foundation", 32, 33, 25, 0, 0, false, 0},
-    {"texture", "Texture", 26, 27, 14, 0, 0, false, 0},
-    {"drums", "Drums", 16, 17, 13, 0, 0, false, 0},
-    {"keys", "Keys", 34, 35, 21, 0, 0, false, 0},
-    {"solo", "Solo", 36, 39, 22, 0, 0, false, 0},
+    {"foundation", "Foundation", 32, 33, 25, 0, 0, 0, false, 0},
+    {"texture", "Texture", 26, 27, 14, 0, 0, 0, false, 0},
+    {"drums", "Drums", 16, 17, 13, 0, 0, 0, false, 0},
+    {"keys", "Keys", 34, 35, 21, 0, 0, 0, false, 0},
+    {"solo", "Solo", 36, 39, 22, 0, 0, 0, false, 0},
 };
 
 struct NfcReaderState {
@@ -163,6 +164,73 @@ static uint8_t readEncoderState(const EncoderState &encoder) {
   const uint8_t clk = digitalRead(encoder.clkPin) == HIGH ? 1 : 0;
   const uint8_t dt = digitalRead(encoder.dtPin) == HIGH ? 1 : 0;
   return (clk << 1) | dt;
+}
+
+static void IRAM_ATTR handleEncoderInterrupt(size_t index) {
+  EncoderState &encoder = encoders[index];
+  const uint8_t currentState = readEncoderState(encoder);
+  const uint8_t transition = (encoder.lastState << 2) | currentState;
+  const int8_t movement = QUADRATURE_TABLE[transition];
+
+  if (movement != 0) {
+    encoder.accumulator += movement;
+
+    if (encoder.accumulator >= 4) {
+      encoder.accumulator = 0;
+      encoder.pendingSteps++;
+    } else if (encoder.accumulator <= -4) {
+      encoder.accumulator = 0;
+      encoder.pendingSteps--;
+    }
+  }
+
+  encoder.lastState = currentState;
+}
+
+static void IRAM_ATTR handleEncoder0Interrupt() {
+  handleEncoderInterrupt(0);
+}
+
+static void IRAM_ATTR handleEncoder1Interrupt() {
+  handleEncoderInterrupt(1);
+}
+
+static void IRAM_ATTR handleEncoder2Interrupt() {
+  handleEncoderInterrupt(2);
+}
+
+static void IRAM_ATTR handleEncoder3Interrupt() {
+  handleEncoderInterrupt(3);
+}
+
+static void IRAM_ATTR handleEncoder4Interrupt() {
+  handleEncoderInterrupt(4);
+}
+
+using EncoderInterruptHandler = void (*)();
+EncoderInterruptHandler encoderInterruptHandlers[] = {
+    handleEncoder0Interrupt,
+    handleEncoder1Interrupt,
+    handleEncoder2Interrupt,
+    handleEncoder3Interrupt,
+    handleEncoder4Interrupt,
+};
+
+static int16_t drainEncoderSteps(EncoderState &encoder) {
+  noInterrupts();
+  const int16_t steps = encoder.pendingSteps;
+  encoder.pendingSteps = 0;
+  interrupts();
+  return steps;
+}
+
+static void attachEncoderInterrupts() {
+  for (size_t index = 0; index < ENCODER_COUNT; index++) {
+    EncoderState &encoder = encoders[index];
+    const EncoderInterruptHandler handler = encoderInterruptHandlers[index];
+    attachInterrupt(digitalPinToInterrupt(encoder.clkPin), handler, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(encoder.dtPin), handler, CHANGE);
+  }
 }
 
 static const LayerSpec *findLayer(const char *layerId) {
@@ -436,23 +504,17 @@ static void toggleLayerMuteFromEncoder(EncoderState &encoder) {
 static void readEncoders() {
   for (size_t index = 0; index < ENCODER_COUNT; index++) {
     EncoderState &encoder = encoders[index];
-    const uint8_t currentState = readEncoderState(encoder);
-    const uint8_t transition = (encoder.lastState << 2) | currentState;
-    const int8_t movement = QUADRATURE_TABLE[transition];
+    const int16_t pendingSteps = drainEncoderSteps(encoder);
 
-    if (movement != 0) {
-      encoder.accumulator += movement;
-
-      if (encoder.accumulator >= 4) {
-        encoder.accumulator = 0;
+    if (pendingSteps > 0) {
+      for (int16_t step = 0; step < pendingSteps; step++) {
         adjustLayerVolumeFromEncoder(encoder, 1);
-      } else if (encoder.accumulator <= -4) {
-        encoder.accumulator = 0;
+      }
+    } else if (pendingSteps < 0) {
+      for (int16_t step = 0; step > pendingSteps; step--) {
         adjustLayerVolumeFromEncoder(encoder, -1);
       }
     }
-
-    encoder.lastState = currentState;
 
     const bool buttonPressed = digitalRead(encoder.swPin) == LOW;
     const uint32_t now = millis();
@@ -1282,8 +1344,15 @@ void setup() {
     Serial.print(", DT GPIO");
     Serial.print(encoder.dtPin);
     Serial.print(", SW GPIO");
-    Serial.println(encoder.swPin);
+    Serial.print(encoder.swPin);
+    Serial.print(", state CLK ");
+    Serial.print((encoder.lastState >> 1) & 1);
+    Serial.print(", DT ");
+    Serial.println(encoder.lastState & 1);
   }
+
+  attachEncoderInterrupts();
+  Serial.println("Encoder interrupts attached.");
 
   startNfcReaders();
   Serial.println("Ready.");

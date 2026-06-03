@@ -1,4 +1,5 @@
 ## Codex
+- Switched ESP32 rotary encoder rotation from loop polling to GPIO interrupts and flashed the board so GPIO32/GPIO33 turns are captured during PN532 reads.
 - Increased NFC responsiveness by shortening five-reader PN532 scan/removal windows and fixing continuous-card heartbeat timing to use last emitted reads.
 - Made encoder diagnostic fallbacks accumulate pending turns/buttons and documented that KY-040 `SW` is optional for rotation plus the one-encoder GPIO32/GPIO33 test path.
 - Guarded encoder diagnostic serial handling so `ENC` and `BUTTON` only act as delayed fallbacks when authoritative `VOLUME` and `MUTE` lines do not arrive.
