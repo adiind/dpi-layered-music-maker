@@ -54,6 +54,8 @@ interface InputEventOptions {
   sourceLabel?: string;
 }
 
+const NFC_BROWSER_PRESENCE_TIMEOUT_MS = 3400;
+
 const formatNow = () =>
   new Date().toLocaleTimeString([], {
     hour: "numeric",
@@ -81,6 +83,12 @@ const createEmptyNfcPresence = () =>
 
 const createEmptyReaderLayerMap = () =>
   NFC_TAG_IDS.reduce((presence, tagId) => ({ ...presence, [tagId]: null }), {} as Record<NfcTagId, LayerId | null>);
+
+const createEmptyReaderTimers = () =>
+  NFC_TAG_IDS.reduce(
+    (timers, tagId) => ({ ...timers, [tagId]: null }),
+    {} as Record<NfcTagId, ReturnType<typeof setTimeout> | null>,
+  );
 
 const createInitialReaderStatuses = (): Record<NfcTagId, NfcReaderStatus> =>
   NFC_TAG_IDS.reduce(
@@ -146,6 +154,7 @@ const App = () => {
   const mutesRef = useRef<MuteState>({ ...DEFAULT_MUTES });
   const nfcPresenceRef = useRef<Record<LayerId, boolean>>(createEmptyNfcPresence());
   const activeReaderLayersRef = useRef<Record<NfcTagId, LayerId | null>>(createEmptyReaderLayerMap());
+  const nfcPresenceTimeoutsRef = useRef<Record<NfcTagId, ReturnType<typeof setTimeout> | null>>(createEmptyReaderTimers());
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -212,7 +221,30 @@ const App = () => {
   }, []);
 
   const clearNfcPresence = useCallback(() => {
+    Object.values(nfcPresenceTimeoutsRef.current).forEach((timer) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
+    nfcPresenceTimeoutsRef.current = createEmptyReaderTimers();
     activeReaderLayersRef.current = createEmptyReaderLayerMap();
+    syncNfcPresenceFromReaders();
+  }, [syncNfcPresenceFromReaders]);
+
+  const closeReaderPresence = useCallback((tagId: NfcTagId) => {
+    const timer = nfcPresenceTimeoutsRef.current[tagId];
+    if (timer) {
+      clearTimeout(timer);
+      nfcPresenceTimeoutsRef.current = {
+        ...nfcPresenceTimeoutsRef.current,
+        [tagId]: null,
+      };
+    }
+
+    activeReaderLayersRef.current = {
+      ...activeReaderLayersRef.current,
+      [tagId]: null,
+    };
     syncNfcPresenceFromReaders();
   }, [syncNfcPresenceFromReaders]);
 
@@ -222,6 +254,57 @@ const App = () => {
       [tagId]: layerId,
     };
     syncNfcPresenceFromReaders();
+  }, [syncNfcPresenceFromReaders]);
+
+  const markReaderHeartbeat = useCallback((tagId: NfcTagId, layerId: LayerId) => {
+    const existingTimer = nfcPresenceTimeoutsRef.current[tagId];
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    activeReaderLayersRef.current = {
+      ...activeReaderLayersRef.current,
+      [tagId]: layerId,
+    };
+    syncNfcPresenceFromReaders();
+
+    const timeout = setTimeout(() => {
+      nfcPresenceTimeoutsRef.current = {
+        ...nfcPresenceTimeoutsRef.current,
+        [tagId]: null,
+      };
+      const previousLayerId = activeReaderLayersRef.current[tagId];
+      activeReaderLayersRef.current = {
+        ...activeReaderLayersRef.current,
+        [tagId]: null,
+      };
+      syncNfcPresenceFromReaders();
+
+      const previousLayer = previousLayerId ? getLayer(previousLayerId) : undefined;
+      setReaderStatuses((current) => ({
+        ...current,
+        [tagId]: {
+          tagId,
+          state: "detected",
+          title: `${getReaderLabel(tagId)} timed out`,
+          detail: previousLayer ? `${previousLayer.name} audio gate closed after no NFC reads.` : "No active card on this reader.",
+          atLabel: formatNow(),
+        },
+      }));
+      setLastInputLabel(`${getReaderLabel(tagId)} card timed out`);
+      setHardwareActivity({
+        kind: "read",
+        title: `${getReaderLabel(tagId)} card removed`,
+        detail: previousLayer ? `${previousLayer.name} stopped after no NFC reads` : "Layer gate closed.",
+        tagId,
+        atLabel: formatNow(),
+      });
+    }, NFC_BROWSER_PRESENCE_TIMEOUT_MS);
+
+    nfcPresenceTimeoutsRef.current = {
+      ...nfcPresenceTimeoutsRef.current,
+      [tagId]: timeout,
+    };
   }, [syncNfcPresenceFromReaders]);
 
   useEffect(() => {
@@ -477,7 +560,7 @@ const App = () => {
           setSelectedTagId(tagId);
 
           if (uidAllowed) {
-            setReaderLayerPresence(tagId, assignment.layerId);
+            markReaderHeartbeat(tagId, assignment.layerId);
             if (assignment.uid && uid === assignment.uid) {
               handleInputRef.current({
                 layerId: assignment.layerId,
@@ -509,7 +592,7 @@ const App = () => {
               atLabel: nowLabel,
             });
           } else {
-            setReaderLayerPresence(tagId, null);
+            closeReaderPresence(tagId);
             updateReaderStatus(tagId, {
               state: "tag-unassigned",
               title: `${getReaderLabel(tagId)} wrong card`,
@@ -533,7 +616,7 @@ const App = () => {
         if (isNfcTagId(tagId)) {
           const previousLayerId = activeReaderLayersRef.current[tagId];
           const previousLayer = previousLayerId ? getLayer(previousLayerId) : undefined;
-          setReaderLayerPresence(tagId, null);
+          closeReaderPresence(tagId);
           updateReaderStatus(tagId, {
             state: "detected",
             title: `${getReaderLabel(tagId)} card removed`,
@@ -559,6 +642,14 @@ const App = () => {
           const layer = savedAssignment ? getLayer(savedAssignment.layerId) : undefined;
           const option = savedAssignment ? getLayerOption(savedAssignment.layerId, savedAssignment.optionId) : undefined;
           const uidMatched = Boolean(uid && savedAssignment?.uid === uid);
+          const assignment = resolveNfcAssignment(nfcAssignmentsRef.current, tagId);
+          const uidAllowed = !assignment.uid || !uid || assignment.uid === uid;
+
+          if (uidAllowed) {
+            markReaderHeartbeat(tagId, assignment.layerId);
+          } else {
+            closeReaderPresence(tagId);
+          }
 
           updateReaderStatus(tagId, {
             state: uidMatched ? "tag-assigned" : "tag-unassigned",
@@ -685,7 +776,7 @@ const App = () => {
       if (event.kind === "read-card") {
         setSelectedTagId(event.tagId);
         if (event.layerId) {
-          setReaderLayerPresence(event.tagId, event.layerId);
+          markReaderHeartbeat(event.tagId, event.layerId);
         }
         updateReaderStatus(event.tagId, {
           state: "tag-assigned",
@@ -748,10 +839,11 @@ const App = () => {
       disconnectStatus();
       disconnectLines();
       disconnectCardEvents();
+      clearNfcPresence();
       void adapter.disconnect();
       hardwareAdapterRef.current = null;
     };
-  }, [clearNfcPresence, setReaderLayerPresence, syncHardwareVolumes]);
+  }, [clearNfcPresence, closeReaderPresence, markReaderHeartbeat, syncHardwareVolumes]);
 
   useEffect(() => {
     const adapter = new KeyboardNfcMockAdapter(resolveNextOption);

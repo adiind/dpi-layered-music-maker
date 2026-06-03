@@ -1,4 +1,5 @@
 ## Codex
+- Added browser-side NFC presence timeouts so layers turn off when older firmware stops sending tag/read heartbeats after card removal.
 - Stopped raw NFC UID repeat lines from reapplying default slot options so DPI card payloads like Drum w Duck no longer reset every second.
 - Stabilized NFC presence polling by round-robin polling one reader at a time, requiring multiple missed reads before tag removal, and lowering NeoPixel brightness.
 - Added NFC presence-gated playback and NeoPixel behavior so layers only sound and light while their reader has a card present.
