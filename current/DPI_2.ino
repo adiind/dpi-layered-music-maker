@@ -60,11 +60,13 @@ constexpr uint8_t NEOPIXEL_PIN = 12;
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
 constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 70;
-constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 14;
+constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 35;
+constexpr uint8_t NEOPIXEL_SELF_TEST_PERCENT = 85;
 constexpr uint8_t NEOPIXEL_BREATHE_MIN_PERCENT = 38;
 constexpr uint8_t NEOPIXEL_BREATHE_MAX_PERCENT = 115;
 constexpr uint16_t NEOPIXEL_BREATHE_PERIOD_MS = 500;
 constexpr uint16_t NEOPIXEL_FRAME_MS = 33;
+constexpr uint16_t NEOPIXEL_SELF_TEST_MS = 900;
 
 Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
 Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
@@ -311,6 +313,26 @@ static void renderNeoPixels() {
 
   layerPixels.show();
   lastNeoPixelFrameMs = millis();
+}
+
+static void showNeoPixelSelfTest() {
+  for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
+    const LayerSpec &layer = LAYERS[layerIndex];
+    const uint8_t red = scaleColor(layer.red, NEOPIXEL_SELF_TEST_PERCENT);
+    const uint8_t green = scaleColor(layer.green, NEOPIXEL_SELF_TEST_PERCENT);
+    const uint8_t blue = scaleColor(layer.blue, NEOPIXEL_SELF_TEST_PERCENT);
+
+    for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
+      const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
+      if (pixelIndex < NEOPIXEL_COUNT) {
+        layerPixels.setPixelColor(pixelIndex, red, green, blue);
+      }
+    }
+  }
+
+  layerPixels.show();
+  delay(NEOPIXEL_SELF_TEST_MS);
+  renderNeoPixels();
 }
 
 static void updateNeoPixelAnimation() {
@@ -1317,7 +1339,7 @@ void setup() {
 
   layerPixels.begin();
   layerPixels.clear();
-  renderNeoPixels();
+  showNeoPixelSelfTest();
   Serial.print("NeoPixel strip: DATA GPIO");
   Serial.print(NEOPIXEL_PIN);
   Serial.print(", LEDs ");

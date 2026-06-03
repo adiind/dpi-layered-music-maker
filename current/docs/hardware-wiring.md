@@ -166,7 +166,7 @@ GPIO12 is an ESP32 boot strapping pin. The NeoPixel data input is usually high i
 5. Turn each encoder and confirm lines like `ENC:foundation:+1` and `VOLUME:foundation:84`.
 6. Press each encoder and confirm lines like `BUTTON:foundation:PRESS`, `MUTE:foundation:1`, and `VOLUME:foundation:0`.
 7. Place an NFC tag on each reader and confirm lines like `TAG:tag-1:04:A1:B2:C3:D4:E5:80`.
-8. Move layer volume sliders and confirm the NeoPixel groups brighten/dim in yellow, orange, red, green, and blue.
+8. Confirm the NeoPixel strip flashes all five layer colors at boot, then settles to one center LED per layer. Move layer volume sliders and confirm the groups brighten/dim in light blue, red, yellow, dark blue, and orange.
 9. To program a card, select a reader slot and option in NFC Studio, click Write NTAG Card, hold the card on that reader, and wait for `WRITE_SUCCESS` or `WRITE_UNVERIFIED`.
 
 ## Pins To Avoid
