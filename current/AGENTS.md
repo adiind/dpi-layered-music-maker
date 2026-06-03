@@ -1,4 +1,5 @@
 ## Codex
+- Reversed firmware volume direction for encoders 2-5 and tuned PN532 polling/removal windows for steadier NTAG recognition.
 - Made DPI card payload reads the only NFC path that can change layer options, preventing stale UID assignments from fighting Piano 1/2 with Piano 3.
 - Added a Mix-tab hardware button visualizer where encoder SW presses and on-screen button pads toggle each layer between playing and paused.
 - Fixed NFC card recognition so valid DPI payloads override stale saved UIDs, successful rewrites save the new UID, and changing a slot clears the old UID.

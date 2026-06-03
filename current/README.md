@@ -47,9 +47,10 @@ The ESP32 firmware in `DPI_2.ino` handles:
 - NFC card payload reads/writes using `dpi://v1/layer/<layer>/option/<option>`.
 - KY-040 rotary encoder volume using GPIO interrupts.
 - KY-040 button mute when `SW` is wired.
-- NeoPixel layer indicators on GPIO12.
+- NeoPixel layer indicators on GPIO12 / P12.
 
 `SW` is optional for rotation. A KY-040 only needs `+`, `GND`, `CLK`, and `DT` to control volume.
+Encoders 2 through 5 are direction-corrected in firmware for the current physical wiring.
 
 ## Serial Events
 
@@ -115,4 +116,5 @@ docs/hardware-wiring.md             Wiring map and bring-up checklist
 - The physical LED strip is mapped in reverse order because the installed strip direction is opposite the UI order.
 - The app does not need a backend.
 - Web Serial requires a Chromium-based browser.
-- If flashing fails, disconnect the app from ESP32 and retry. If boot/flashing is still flaky, unplug NeoPixel DIN from GPIO12 during upload.
+- If flashing fails, disconnect the app from ESP32 and retry. If boot/flashing is still flaky, unplug NeoPixel DIN from GPIO12/P12 during upload, or add a 10k pulldown from P12 to GND.
+- If NTAG215 recognition is flaky, use a stronger shared 3.3V supply for the PN532 boards, common ground, short SPI wiring, antenna spacing, and a 470uF capacitor on the reader power rail.

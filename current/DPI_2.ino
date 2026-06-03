@@ -29,11 +29,11 @@
 //   TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint16_t NFC_READ_TIMEOUT_MS = 55;
+constexpr uint16_t NFC_READ_TIMEOUT_MS = 75;
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
-constexpr uint32_t NFC_REPEAT_WINDOW_MS = 650;
-constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1800;
-constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;
+constexpr uint32_t NFC_REPEAT_WINDOW_MS = 550;
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 2800;
+constexpr uint8_t NFC_REMOVED_MISS_COUNT = 8;
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -41,7 +41,7 @@ constexpr uint16_t NDEF_READ_LIMIT = 160;
 constexpr size_t DPI_PAYLOAD_LIMIT = 96;
 constexpr uint32_t BUTTON_DEBOUNCE_MS = 45;
 constexpr uint8_t ENCODER_VOLUME_STEP_PERCENT = 4;
-constexpr uint8_t PN532_PASSIVE_ACTIVATION_RETRIES = 0x03;
+constexpr uint8_t PN532_PASSIVE_ACTIVATION_RETRIES = 0x06;
 
 const char DPI_PAYLOAD_PREFIX[] = "dpi://v1/layer/";
 const char DPI_PAYLOAD_OPTION_MARKER[] = "/option/";
@@ -225,6 +225,10 @@ static int16_t drainEncoderSteps(EncoderState &encoder) {
   encoder.pendingSteps = 0;
   interrupts();
   return steps;
+}
+
+static int8_t getEncoderDirectionMultiplier(size_t index) {
+  return index == 0 ? 1 : -1;
 }
 
 static void attachEncoderInterrupts() {
@@ -535,14 +539,15 @@ static void readEncoders() {
   for (size_t index = 0; index < ENCODER_COUNT; index++) {
     EncoderState &encoder = encoders[index];
     const int16_t pendingSteps = drainEncoderSteps(encoder);
+    const int8_t directionMultiplier = getEncoderDirectionMultiplier(index);
 
     if (pendingSteps > 0) {
       for (int16_t step = 0; step < pendingSteps; step++) {
-        adjustLayerVolumeFromEncoder(encoder, 1);
+        adjustLayerVolumeFromEncoder(encoder, directionMultiplier);
       }
     } else if (pendingSteps < 0) {
       for (int16_t step = 0; step > pendingSteps; step--) {
-        adjustLayerVolumeFromEncoder(encoder, -1);
+        adjustLayerVolumeFromEncoder(encoder, -directionMultiplier);
       }
     }
 

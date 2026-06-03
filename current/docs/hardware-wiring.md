@@ -71,7 +71,7 @@ flowchart LR
   E3["KY-040 Encoder 3<br/>Drums"]
   E4["KY-040 Encoder 4<br/>Keys"]
   E5["KY-040 Encoder 5<br/>Solo"]
-  LED["25 NeoPixel strip<br/>5 LEDs per layer<br/>DIN GPIO12"]
+  LED["25 NeoPixel strip<br/>5 LEDs per layer<br/>DIN GPIO12 / P12"]
 
   USB --> ESP
   ESP --> BUS
@@ -90,7 +90,7 @@ flowchart LR
   ESP -- "CLK16 DT17 SW13<br/>3V3 GND" --> E3
   ESP -- "CLK34 DT35 SW21<br/>3V3 GND" --> E4
   ESP -- "CLK36 DT39 SW22<br/>3V3 GND" --> E5
-  ESP -- "DIN12 + 5V + GND" --> LED
+  ESP -- "DIN12/P12 + 5V + GND" --> LED
 ```
 
 ## Shared PN532 SPI Wiring
@@ -133,6 +133,8 @@ Wire every KY-040 `VCC` or `+` pin to ESP32 `3V3`, and every `GND` pin to ESP32 
 
 GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide internal pullups. They are only used for encoder CLK/DT signals here. If the Keys or Solo encoders feel unstable, add external 10k pullup resistors from those CLK/DT lines to 3V3.
 
+The firmware reverses the rotation direction for encoders 2 through 5 so the physical direction matches the UI volume direction with the current wiring.
+
 If the app connects to the ESP32 but rotating an encoder prints no `ENC:<layer>:+1/-1` or `VOLUME:<layer>:<0-100>` lines in Hardware Feed, test only the Foundation encoder first: `+` to `3V3`, `GND` to `GND`, `CLK` to GPIO32, and `DT` to GPIO33. If that still prints nothing, check the KY-040 pin labels, common ground, power, and screw-terminal row before debugging the browser UI.
 
 ## NeoPixel Strip Wiring
@@ -155,7 +157,18 @@ Wire the strip like this:
 | GND | GND | Must share ground with ESP32 and external LED power. |
 | 5V | External 5V recommended | 25 LEDs can pull more current than the ESP32 5V pin should provide at high brightness. |
 
-GPIO12 is an ESP32 boot strapping pin. The NeoPixel data input is usually high impedance, but if flashing or booting becomes unreliable, unplug the NeoPixel DIN wire while flashing and reconnect after boot.
+GPIO12 is an ESP32 boot strapping pin. With this many modules there is no clean unused safe output left, so the current build keeps NeoPixel data on P12. If flashing or booting becomes unreliable, unplug NeoPixel DIN while uploading, or add a 10k pulldown from P12 to GND plus a 330-470 ohm series resistor between P12 and strip DIN. Moving the strip to another safe GPIO requires giving up or remapping one button/reader pin.
+
+## NFC Recognition Stability
+
+Five PN532 readers on one ESP32 can become marginal if the RF field or power rail is weak. For reliable NTAG215 reads:
+
+- Power the PN532 boards from a solid 3.3V supply, not only a weak dev-board regulator, and tie the supply ground to ESP32 GND.
+- Add a 470uF capacitor across the PN532 power rail near the reader cluster.
+- Keep SCK, MISO, MOSI, CS, and GND wires short; run a ground wire near the SPI signal bundle.
+- Keep PN532 antennas separated from each other, the NeoPixel power wire, metal, laptops, and phone cases.
+- Hold sticker tags flat and centered over the antenna; large NTAG215 stickers can read worse at the edge of some cheap PN532 coils.
+- Test one reader and one tag alone first. If one reader is much weaker than the others, swap the PN532 module rather than chasing code.
 
 ## First Bring-Up
 
