@@ -1,4 +1,5 @@
 ## Codex
+- Flashed the ESP32 firmware where encoders control volume/mute and GPIO12 drives the five-color 25-LED NeoPixel strip.
 - Changed ESP32 encoder behavior so turns control layer volume and button presses toggle mute, with UI/audio/NeoPixel sync from `VOLUME` and `MUTE` serial lines.
 - Added 25-LED NeoPixel strip support on GPIO12 with five layer color groups driven by app volume/mute serial updates.
 - Added an unverified NTAG write state so ACKed writes with flaky PN532 memory readback save the UID and show as sent-but-not-verified instead of hard failing.
