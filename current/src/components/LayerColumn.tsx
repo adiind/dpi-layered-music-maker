@@ -77,7 +77,7 @@ export const LayerColumn = ({
 }: LayerColumnProps) => {
   const currentOption = layer.options.find((option) => option.id === selectedOptionId);
   const ringValue = muted ? 0 : Math.max(0.03, volume);
-  const statusLabel = muted ? "Muted" : active ? "Active" : nfcPresent ? "Ready" : "Needs NFC";
+  const statusLabel = muted ? "Paused" : active ? "Playing" : nfcPresent ? "Ready" : "Needs NFC";
 
   return (
     <section
@@ -106,7 +106,7 @@ export const LayerColumn = ({
         <div className="knob-face">
           <span />
         </div>
-        <div className="volume-value">{muted ? "muted" : `${Math.round(volume * 100)}%`}</div>
+        <div className="volume-value">{muted ? "paused" : `${Math.round(volume * 100)}%`}</div>
       </div>
 
       <div className="channel-main">
@@ -178,7 +178,7 @@ export const LayerColumn = ({
           className={classNames("mute-button", muted && "muted")}
         >
           {muted ? <MutedIcon /> : <VolumeIcon />}
-          {muted ? "Muted" : "On"}
+          {muted ? "Paused" : "On"}
         </button>
       </div>
     </section>

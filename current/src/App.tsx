@@ -205,6 +205,7 @@ const App = () => {
   const [volumes, setVolumes] = useState<VolumeState>({ ...DEFAULT_VOLUMES });
   const [mutes, setMutes] = useState<MuteState>({ ...DEFAULT_MUTES });
   const [nfcPresence, setNfcPresence] = useState<Record<LayerId, boolean>>(() => createEmptyNfcPresence());
+  const [buttonPressCounts, setButtonPressCounts] = useState<Record<LayerId, number>>(() => createEmptyLayerCounts());
   const [tick, setTick] = useState<EngineTick>(INITIAL_TICK);
   const [lastInputLabel, setLastInputLabel] = useState("No input yet");
   const [changeNotice, setChangeNotice] = useState<ChangeNotice | null>(null);
@@ -266,6 +267,16 @@ const App = () => {
 
   const sendTransportToHardware = useCallback((playing = isPlayingRef.current) => {
     void hardwareAdapterRef.current?.setTransportPlaying(playing);
+  }, []);
+
+  const flashLayerButton = useCallback((layerId: LayerId) => {
+    setButtonPressCounts((current) => ({ ...current, [layerId]: current[layerId] + 1 }));
+    setRecentLayerId(layerId);
+
+    if (changeClearRef.current) {
+      clearTimeout(changeClearRef.current);
+    }
+    changeClearRef.current = setTimeout(() => setRecentLayerId(null), 900);
   }, []);
 
   const syncNfcPresenceFromReaders = useCallback(() => {
@@ -646,7 +657,7 @@ const App = () => {
         engineRef.current?.setMuted(layerId, muted);
         setHardwareActivity({
           kind: "serial",
-          title: `${getLayer(layerId)?.name ?? layerId} ${muted ? "muted" : "unmuted"}`,
+          title: `${getLayer(layerId)?.name ?? layerId} ${muted ? "paused" : "started"}`,
           detail,
           atLabel: nowLabel,
         });
@@ -680,6 +691,7 @@ const App = () => {
         };
       } else if (encoderButtonEvent) {
         const { layerId } = encoderButtonEvent;
+        flashLayerButton(layerId);
         cancelEncoderMuteFallbackTimer(layerId);
         const pendingPresses = encoderMuteFallbackPressesRef.current[layerId] + 1;
         encoderMuteFallbackPressesRef.current = { ...encoderMuteFallbackPressesRef.current, [layerId]: pendingPresses };
@@ -1118,6 +1130,7 @@ const App = () => {
   }, [
     clearNfcPresence,
     closeReaderPresence,
+    flashLayerButton,
     markReaderHeartbeat,
     rememberReaderCard,
     scheduleReaderRemoval,
@@ -1324,13 +1337,14 @@ const App = () => {
   };
 
   const handleToggleMute = useCallback((layerId: LayerId) => {
+    flashLayerButton(layerId);
     setMutes((current) => {
       const next = { ...current, [layerId]: !current[layerId] };
       engineRef.current?.setMuted(layerId, next[layerId]);
       sendLayerVolumeToHardware(layerId, volumesRef.current[layerId], next[layerId]);
       return next;
     });
-  }, [sendLayerVolumeToHardware]);
+  }, [flashLayerButton, sendLayerVolumeToHardware]);
 
   const handleVolume = useCallback((layerId: LayerId, volume: number) => {
     setVolumes((current) => ({ ...current, [layerId]: volume }));
@@ -1411,8 +1425,13 @@ const App = () => {
             assignments={nfcAssignments}
             onTap={handleProgrammedTagTap}
             volumes={volumes}
+            mutes={mutes}
+            nfcPresence={nfcPresence}
+            activeLayerIds={tick.activeLayers}
+            buttonPressCounts={buttonPressCounts}
             espConnected={espConnected}
             lastInputLabel={lastInputLabel}
+            onToggleLayer={handleToggleMute}
           />
         </>
       ) : (

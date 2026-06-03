@@ -1,22 +1,32 @@
 import type { CSSProperties } from "react";
 import { getLayer, getLayerOption, LAYER_DEFINITIONS } from "../data/layers";
-import type { NfcTagAssignment, NfcTagId, VolumeState } from "../types/music";
+import type { LayerId, MuteState, NfcTagAssignment, NfcTagId, VolumeState } from "../types/music";
 import { TagIcon } from "./icons";
 
 interface NfcMockPanelProps {
   assignments: NfcTagAssignment[];
   onTap: (tagId: NfcTagId) => void;
   volumes: VolumeState;
+  mutes: MuteState;
+  nfcPresence: Record<LayerId, boolean>;
+  activeLayerIds: LayerId[];
+  buttonPressCounts: Record<LayerId, number>;
   espConnected: boolean;
   lastInputLabel: string;
+  onToggleLayer: (layerId: LayerId) => void;
 }
 
 export const NfcMockPanel = ({
   assignments,
   onTap,
   volumes,
+  mutes,
+  nfcPresence,
+  activeLayerIds,
+  buttonPressCounts,
   espConnected,
   lastInputLabel,
+  onToggleLayer,
 }: NfcMockPanelProps) => (
   <section className="hardware-panel">
     <div className="hardware-status-block">
@@ -35,7 +45,7 @@ export const NfcMockPanel = ({
                 {
                   "--layer-color": layer.accent,
                   "--ring-value": volumes[layer.id],
-                } as React.CSSProperties
+                } as CSSProperties
               }
             >
               <span />
@@ -44,6 +54,33 @@ export const NfcMockPanel = ({
             <em>{Math.round(volumes[layer.id] * 100)}%</em>
           </div>
         ))}
+      </div>
+    </div>
+
+    <div className="button-bank">
+      <span>Buttons</span>
+      <div>
+        {LAYER_DEFINITIONS.map((layer) => {
+          const active = activeLayerIds.includes(layer.id);
+          const muted = mutes[layer.id];
+          const waiting = !nfcPresence[layer.id];
+          const label = muted ? "Paused" : waiting ? "Waiting" : active ? "Playing" : "Ready";
+
+          return (
+            <button
+              key={layer.id}
+              type="button"
+              onClick={() => onToggleLayer(layer.id)}
+              className={muted ? "paused" : active ? "playing" : waiting ? "waiting" : ""}
+              style={{ "--layer-color": layer.accent } as CSSProperties}
+              aria-label={`${layer.name} hardware button ${label}`}
+            >
+              <i key={buttonPressCounts[layer.id]} aria-hidden="true" />
+              <strong>{layer.order}</strong>
+              <em>{label}</em>
+            </button>
+          );
+        })}
       </div>
     </div>
 

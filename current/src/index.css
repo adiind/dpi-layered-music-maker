@@ -617,6 +617,7 @@ input:focus-visible {
 .change-notice span,
 .hardware-panel span,
 .encoder-bank > span,
+.button-bank > span,
 .tag-bank > span,
 .input-signal > span {
   color: #637083;
@@ -688,7 +689,7 @@ input:focus-visible {
 
 .hardware-panel {
   display: grid;
-  grid-template-columns: 0.75fr 1.7fr 2fr 1.55fr;
+  grid-template-columns: 0.7fr 1.3fr 2.25fr 1.8fr 1.3fr;
   gap: 12px;
   width: min(100% - 20px, 1640px);
   margin: 0 auto 10px;
@@ -701,6 +702,7 @@ input:focus-visible {
 
 .hardware-status-block,
 .encoder-bank,
+.button-bank,
 .tag-bank,
 .input-signal {
   min-width: 0;
@@ -733,6 +735,7 @@ input:focus-visible {
 }
 
 .encoder-bank > div,
+.button-bank > div,
 .tag-bank > div {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -781,11 +784,70 @@ input:focus-visible {
 }
 
 .encoder-readout em,
+.button-bank button em,
 .tag-bank button em {
   color: #637083;
   font-size: 11px;
   font-style: normal;
   line-height: 1;
+}
+
+.button-bank button {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 5px;
+  border: 1px solid #ccd5e0;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 7px 5px;
+  color: #637083;
+}
+
+.button-bank button i {
+  width: 32px;
+  height: 32px;
+  border: 3px solid color-mix(in srgb, var(--layer-color) 55%, #ffffff);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 44%, #ffffff 0 28%, transparent 29%),
+    color-mix(in srgb, var(--layer-color) 20%, #ffffff);
+  box-shadow: inset 0 -5px 9px rgba(15, 23, 42, 0.16);
+  animation: button-pop 360ms ease-out;
+}
+
+.button-bank button.playing i {
+  border-color: var(--layer-color);
+  background: var(--layer-color);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--layer-color) 14%, transparent),
+    inset 0 -5px 9px rgba(15, 23, 42, 0.2);
+}
+
+.button-bank button.paused i {
+  border-color: #a7b1bf;
+  background: #e7edf4;
+}
+
+.button-bank button.waiting i {
+  opacity: 0.45;
+}
+
+.button-bank button strong {
+  color: #111827;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.button-bank button em {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button-bank button:hover {
+  border-color: var(--layer-color);
 }
 
 .tag-bank button {
@@ -843,6 +905,20 @@ input:focus-visible {
 
 .input-signal i.peak {
   background: #f5c01b;
+}
+
+@keyframes button-pop {
+  0% {
+    transform: scale(0.82);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--layer-color) 38%, transparent);
+  }
+  70% {
+    transform: scale(1.09);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--layer-color) 0%, transparent);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .nfc-studio {
@@ -1788,6 +1864,7 @@ input:focus-visible {
     align-items: stretch;
   }
 
+  .button-bank,
   .tag-bank {
     border-left: 0;
     padding-left: 0;
@@ -1918,6 +1995,7 @@ input:focus-visible {
   .current-stack div,
   .hardware-status-block,
   .encoder-bank,
+  .button-bank,
   .tag-bank,
   .input-signal {
     border-left: 0;

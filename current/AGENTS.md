@@ -1,4 +1,5 @@
 ## Codex
+- Added a Mix-tab hardware button visualizer where encoder SW presses and on-screen button pads toggle each layer between playing and paused.
 - Fixed NFC card recognition so valid DPI payloads override stale saved UIDs, successful rewrites save the new UID, and changing a slot clears the old UID.
 - Added NFC anti-stutter handling with duplicate card-read suppression, delayed removal confirmation, longer firmware removal tolerance, and a boot line reporting reversed NeoPixel order.
 - Moved the old shape/color experiment into `archive/legacy-shape-fork` and rewrote the repo/current READMEs around the final DPI hardware demo.
