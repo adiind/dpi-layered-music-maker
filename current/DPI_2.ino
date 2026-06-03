@@ -32,8 +32,8 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint16_t NFC_READ_TIMEOUT_MS = 55;
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
 constexpr uint32_t NFC_REPEAT_WINDOW_MS = 650;
-constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1100;
-constexpr uint8_t NFC_REMOVED_MISS_COUNT = 3;
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1800;
+constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -1351,7 +1351,9 @@ void setup() {
   Serial.print("NeoPixel strip: DATA GPIO");
   Serial.print(NEOPIXEL_PIN);
   Serial.print(", LEDs ");
-  Serial.println(NEOPIXEL_COUNT);
+  Serial.print(NEOPIXEL_COUNT);
+  Serial.print(", reverse layer order ");
+  Serial.println(NEOPIXEL_REVERSE_LAYER_ORDER ? "on" : "off");
 
   for (size_t index = 0; index < NFC_READER_COUNT; index++) {
     pinMode(nfcReaders[index].csPin, OUTPUT);

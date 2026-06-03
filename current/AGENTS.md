@@ -1,4 +1,5 @@
 ## Codex
+- Added NFC anti-stutter handling with duplicate card-read suppression, delayed removal confirmation, longer firmware removal tolerance, and a boot line reporting reversed NeoPixel order.
 - Moved the old shape/color experiment into `archive/legacy-shape-fork` and rewrote the repo/current READMEs around the final DPI hardware demo.
 - Reversed the physical NeoPixel layer-group mapping so the installed strip order matches the UI colors despite opposite wiring direction.
 - Added a visible NeoPixel boot self-test and brighter idle center dots so LED wiring failures are obvious before app/NFC state is involved.
