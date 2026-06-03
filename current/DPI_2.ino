@@ -1419,8 +1419,10 @@ void setup() {
   layerPixels.clear();
   showNeoPixelSelfTest();
   Serial.println("NeoPixel self-test done.");
+  Serial.println("NEOPIXEL:ready");
 #else
   Serial.println("0 (strip disabled — set NEOPIXEL_ENABLED 1 to re-enable)");
+  Serial.println("NEOPIXEL:disabled");
 #endif
 
   Serial.print("Buttons (encoder mute): BUTTONS_ENABLED=");

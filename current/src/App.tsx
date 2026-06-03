@@ -834,6 +834,27 @@ const App = () => {
           detail: line,
           atLabel: nowLabel,
         });
+      } else if (line === "NEOPIXEL:ready") {
+        setHardwareActivity({
+          kind: "serial",
+          title: "LED strip ready",
+          detail: "NeoPixel self-test passed on GPIO12. All 5 layer color groups should be visible.",
+          atLabel: nowLabel,
+        });
+      } else if (line === "NEOPIXEL:disabled") {
+        setHardwareActivity({
+          kind: "serial",
+          title: "LED strip disabled in firmware",
+          detail: "Set NEOPIXEL_ENABLED 1 in DPI_2.ino and reflash to enable the LED strip on GPIO12.",
+          atLabel: nowLabel,
+        });
+      } else if (/^LED_FAIL:/i.test(line)) {
+        setHardwareActivity({
+          kind: "serial",
+          title: "LED command rejected",
+          detail: line,
+          atLabel: nowLabel,
+        });
       }
     });
     const disconnectCardEvents = adapter.onCardEvent((event) => {
