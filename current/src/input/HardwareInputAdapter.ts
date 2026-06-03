@@ -40,6 +40,7 @@ type SerialLike = {
 
 type SerialLineListener = (line: string) => void;
 type CardEventListener = (event: NfcCardEvent) => void;
+type ReaderLedState = "off" | "ok" | "bad";
 
 type NavigatorWithSerial = Navigator & {
   serial?: SerialLike;
@@ -344,6 +345,15 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     await this.writer.write(new TextEncoder().encode(command));
   }
 
+  async setReaderLed(tagId: NfcTagId, state: ReaderLedState) {
+    if (!this.port || !this.writer || !isTagId(tagId)) {
+      return;
+    }
+
+    const command = `LED:${tagId}:${state}\n`;
+    await this.writer.write(new TextEncoder().encode(command));
+  }
+
   async requestAndConnect(options?: WebSerialNfcRequestOptions) {
     const serial = getSerial();
     if (!serial) {
@@ -518,15 +528,6 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     const cardEvent = parseNfcCardEventLine(line);
     if (cardEvent) {
       this.emitCardEvent(cardEvent);
-      if (cardEvent.kind === "read-card" && cardEvent.layerId && cardEvent.optionId) {
-        this.emit({
-          layerId: cardEvent.layerId,
-          optionId: cardEvent.optionId,
-          source: "hardware",
-          tagId: cardEvent.tagId,
-          uid: cardEvent.uid,
-        });
-      }
       return;
     }
 

@@ -9,6 +9,7 @@
 // App-to-controller serial commands:
 //   WRITE:<tagId>:<layerId>:<optionId>
 //   VOLUME:<layerId>:<0-100>
+//   LED:<tagId>:off|ok|bad
 //
 // App-readable serial events:
 //   LAYER:<layerId>:<optionId>
@@ -134,6 +135,7 @@ String lastNtagReadError;
 uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
 bool layerMuted[LAYER_COUNT] = {false, false, false, false, false};
 bool layerTagPresent[LAYER_COUNT] = {false, false, false, false, false};
+bool layerLedError[LAYER_COUNT] = {false, false, false, false, false};
 size_t nextNfcReaderIndex = 0;
 
 // Quadrature transition table. Four valid transitions make one detent.
@@ -183,9 +185,9 @@ static void renderNeoPixels() {
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
     const uint8_t volume = layerMuted[layerIndex] || !layerTagPresent[layerIndex] ? 0 : layerVolumes[layerIndex];
-    const uint8_t red = scaleColor(layer.red, volume);
-    const uint8_t green = scaleColor(layer.green, volume);
-    const uint8_t blue = scaleColor(layer.blue, volume);
+    const uint8_t red = layerLedError[layerIndex] ? scaleColor(255, 100) : scaleColor(layer.red, volume);
+    const uint8_t green = layerLedError[layerIndex] ? 0 : scaleColor(layer.green, volume);
+    const uint8_t blue = layerLedError[layerIndex] ? 0 : scaleColor(layer.blue, volume);
 
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
       const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
@@ -204,6 +206,9 @@ static void setReaderLayerPresence(const NfcReaderState &readerState, bool prese
   if (layerTagPresent[layerIndex] == present) return;
 
   layerTagPresent[layerIndex] = present;
+  if (!present) {
+    layerLedError[layerIndex] = false;
+  }
   renderNeoPixels();
 }
 
@@ -229,6 +234,34 @@ static NfcReaderState *findNfcReader(const char *tagId) {
   }
 
   return nullptr;
+}
+
+static bool setReaderLedState(const char *tagId, const char *state) {
+  NfcReaderState *readerState = findNfcReader(tagId);
+  if (!readerState) {
+    return false;
+  }
+
+  const int8_t layerIndex = findLayerIndex(readerState->layerId);
+  if (layerIndex < 0) {
+    return false;
+  }
+
+  if (strcmp(state, "bad") == 0) {
+    layerTagPresent[layerIndex] = true;
+    layerLedError[layerIndex] = true;
+  } else if (strcmp(state, "ok") == 0) {
+    layerTagPresent[layerIndex] = true;
+    layerLedError[layerIndex] = false;
+  } else if (strcmp(state, "off") == 0) {
+    layerTagPresent[layerIndex] = false;
+    layerLedError[layerIndex] = false;
+  } else {
+    return false;
+  }
+
+  renderNeoPixels();
+  return true;
 }
 
 static const char *findLayerOption(const LayerSpec &layer, const char *optionId) {
@@ -928,6 +961,31 @@ static void handleVolumeCommand(const String &command) {
   }
 }
 
+static void handleLedCommand(const String &command) {
+  const int firstSeparator = command.indexOf(':');
+  const int secondSeparator = command.indexOf(':', firstSeparator + 1);
+
+  if (firstSeparator < 0 || secondSeparator < 0) {
+    Serial.println("LED_FAIL:bad-command");
+    return;
+  }
+
+  const String tagId = command.substring(firstSeparator + 1, secondSeparator);
+  const String state = command.substring(secondSeparator + 1);
+
+  if (tagId.length() == 0 || state.length() == 0) {
+    Serial.println("LED_FAIL:empty-field");
+    return;
+  }
+
+  if (!setReaderLedState(tagId.c_str(), state.c_str())) {
+    Serial.print("LED_FAIL:");
+    Serial.print(tagId);
+    Serial.print(":");
+    Serial.println(state);
+  }
+}
+
 static void handleSerialCommand(const String &command) {
   if (command.length() == 0) {
     return;
@@ -937,6 +995,8 @@ static void handleSerialCommand(const String &command) {
     handleWriteCommand(command);
   } else if (command.startsWith("VOLUME:")) {
     handleVolumeCommand(command);
+  } else if (command.startsWith("LED:")) {
+    handleLedCommand(command);
   }
 }
 
@@ -1112,7 +1172,7 @@ void setup() {
   Serial.println();
   Serial.println("DPI ESP32 layer controller");
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
-  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>");
+  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>, LED:<tagId>:off|ok|bad");
 
   layerPixels.begin();
   layerPixels.clear();
