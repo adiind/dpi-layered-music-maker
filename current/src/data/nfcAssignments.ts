@@ -131,6 +131,7 @@ export const updateNfcAssignment = (
           ...assignment,
           layerId,
           optionId,
+          uid: undefined,
           updatedAt,
         }
       : assignment,

@@ -1,4 +1,5 @@
 ## Codex
+- Fixed NFC card recognition so valid DPI payloads override stale saved UIDs, successful rewrites save the new UID, and changing a slot clears the old UID.
 - Added NFC anti-stutter handling with duplicate card-read suppression, delayed removal confirmation, longer firmware removal tolerance, and a boot line reporting reversed NeoPixel order.
 - Moved the old shape/color experiment into `archive/legacy-shape-fork` and rewrote the repo/current READMEs around the final DPI hardware demo.
 - Reversed the physical NeoPixel layer-group mapping so the installed strip order matches the UI colors despite opposite wiring direction.

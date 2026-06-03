@@ -748,7 +748,6 @@ const App = () => {
           const layer = getLayer(assignment.layerId);
           const option = getLayerOption(assignment.layerId, assignment.optionId);
           const uidMatchesSavedAssignment = Boolean(assignment.uid && uid === assignment.uid);
-          const uidRejected = Boolean(assignment.uid && uid && assignment.uid !== uid);
           const currentLayerId = activeReaderLayersRef.current[tagId];
           setSelectedTagId(tagId);
 
@@ -788,31 +787,15 @@ const App = () => {
                 atLabel: nowLabel,
               });
             }
-          } else if (currentLayerId && !uidRejected) {
+          } else if (currentLayerId) {
             markReaderHeartbeat(tagId, currentLayerId);
-          } else if (uidRejected) {
-            closeReaderPresence(tagId);
-            setReaderLedStatus(tagId, "bad");
-            updateReaderStatus(tagId, {
-              state: "tag-unassigned",
-              title: `${getReaderLabel(tagId)} wrong card`,
-              detail: `UID ${uid ?? "unknown"} does not match saved UID ${assignment.uid}. Audio gate closed.`,
-              uid,
-              atLabel: nowLabel,
-            });
-            setLastInputLabel(`${getReaderLabel(tagId)} rejected UID ${uid ?? "unknown"}`);
-            setHardwareActivity({
-              kind: "read",
-              title: "Card UID mismatch",
-              detail: `${getReaderLabel(tagId)} is waiting for ${assignment.uid}.`,
-              tagId,
-              atLabel: nowLabel,
-            });
           } else {
             updateReaderStatus(tagId, {
               state: "tag-unassigned",
               title: `${getReaderLabel(tagId)} card detected`,
-              detail: uid ? `UID ${uid} - waiting for DPI payload before opening audio.` : "Waiting for DPI payload before opening audio.",
+              detail: uid
+                ? `UID ${uid} - checking DPI payload before opening audio.`
+                : "Waiting for DPI payload before opening audio.",
               uid,
               atLabel: nowLabel,
             });
@@ -844,7 +827,6 @@ const App = () => {
           const uidMatched = Boolean(uid && savedAssignment?.uid === uid);
           const assignment = resolveNfcAssignment(nfcAssignmentsRef.current, tagId);
           const uidMatchesSavedAssignment = Boolean(assignment.uid && uid === assignment.uid);
-          const uidRejected = Boolean(assignment.uid && uid && assignment.uid !== uid);
           const currentLayerId = activeReaderLayersRef.current[tagId];
 
           if (uidMatchesSavedAssignment) {
@@ -863,25 +845,18 @@ const App = () => {
                 sourceLabel: `${getReaderLabel(tagId)} saved UID`,
               });
             }
-          } else if (currentLayerId && !uidRejected) {
+          } else if (currentLayerId) {
             markReaderHeartbeat(tagId, currentLayerId);
-          } else if (uidRejected) {
-            closeReaderPresence(tagId);
-            setReaderLedStatus(tagId, "bad");
           }
 
           updateReaderStatus(tagId, {
             state: uidMatched ? "tag-assigned" : "tag-unassigned",
             title: uidMatched
               ? `${getReaderLabel(tagId)} UID assigned`
-              : uidRejected
-                ? `${getReaderLabel(tagId)} wrong card`
-                : `${getReaderLabel(tagId)} unassigned tag`,
+              : `${getReaderLabel(tagId)} checking tag`,
             detail: uidMatched && layer && option
               ? `${layer.name} / ${option.name} - UID ${uid}`
-              : uidRejected
-                ? `UID ${uid ?? "unknown"} does not match saved UID ${assignment.uid}.`
-                : uid ? `UID ${uid} - waiting for DPI payload before opening audio.` : "Raw NFC tag detected without a DPI payload.",
+              : uid ? `UID ${uid} - checking DPI payload before opening audio.` : "Raw NFC tag detected without a DPI payload.",
             uid,
             layerId: uidMatched ? savedAssignment?.layerId : undefined,
             optionId: uidMatched ? savedAssignment?.optionId : undefined,
@@ -931,6 +906,10 @@ const App = () => {
       }
 
       if (event.kind === "write-success") {
+        if (event.uid) {
+          setNfcAssignments((current) => updateNfcAssignmentUid(current, event.tagId, event.uid));
+        }
+
         updateReaderStatus(event.tagId, {
           state: "tag-assigned",
           title: `${readerLabel} wrote card`,
@@ -1004,17 +983,14 @@ const App = () => {
         const expectedLayer = getLayer(assignment.layerId);
         const expectedOption = getLayerOption(assignment.layerId, assignment.optionId);
         const layerMatchesReader = event.layerId === assignment.layerId;
-        const uidMatchesSavedAssignment = !assignment.uid || !event.uid || assignment.uid === event.uid;
 
-        if (!event.layerId || !event.optionId || !layerMatchesReader || !uidMatchesSavedAssignment) {
+        if (!event.layerId || !event.optionId || !layerMatchesReader) {
           closeReaderPresence(event.tagId);
           setReaderLedStatus(event.tagId, "bad");
           updateReaderStatus(event.tagId, {
             state: "tag-unassigned",
             title: `${readerLabel} wrong slot`,
-            detail: layerMatchesReader
-              ? `UID ${event.uid ?? "unknown"} does not match the saved ${readerLabel} card.`
-              : `${readerLabel} expects ${expectedLayer?.name ?? assignment.layerId}, but the card says ${layer?.name ?? event.layerId ?? "unknown"}.`,
+            detail: `${readerLabel} expects ${expectedLayer?.name ?? assignment.layerId}, but the card says ${layer?.name ?? event.layerId ?? "unknown"}.`,
             uid: event.uid,
             layerId: event.layerId,
             optionId: event.optionId,
@@ -1024,9 +1000,7 @@ const App = () => {
           setNfcWriteStatus({
             state: "read",
             title: `${readerLabel} rejected card`,
-            detail: layerMatchesReader
-              ? `Expected saved UID ${assignment.uid}.`
-              : `Expected ${expectedLayer?.name ?? assignment.layerId} / ${expectedOption?.name ?? assignment.optionId}.`,
+            detail: `Expected ${expectedLayer?.name ?? assignment.layerId} / ${expectedOption?.name ?? assignment.optionId}.`,
             tagId: event.tagId,
             layerId: event.layerId,
             optionId: event.optionId,
@@ -1037,14 +1011,16 @@ const App = () => {
           setHardwareActivity({
             kind: "read",
             title: "Wrong reader slot",
-            detail: layerMatchesReader
-              ? `${readerLabel} rejected an unexpected UID.`
-              : `${readerLabel} expects ${expectedLayer?.name ?? assignment.layerId}; card says ${layer?.name ?? event.layerId ?? "unknown"}.`,
+            detail: `${readerLabel} expects ${expectedLayer?.name ?? assignment.layerId}; card says ${layer?.name ?? event.layerId ?? "unknown"}.`,
             tagId: event.tagId,
             atLabel: formatNow(),
           });
           setLastInputLabel(`${readerLabel} rejected wrong card`);
           return;
+        }
+
+        if (event.uid && assignment.uid !== event.uid) {
+          setNfcAssignments((current) => updateNfcAssignmentUid(current, event.tagId, event.uid));
         }
 
         setReaderLedStatus(event.tagId, "ok");
