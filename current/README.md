@@ -1,67 +1,118 @@
-# DPI Layer Mixer
+# DPI Final Demo Visualizer
 
-A React + TypeScript demo instrument for showing how five music channels layer
-into one composition. The UI is built as a live visualizer for an audience:
-each channel has three stem options, its own volume control, and a distinct
-visual language inside the shared timeline.
+`current/` is the active DPI final demo: a five-channel music-layer visualizer with real DPI Music stems, NFC card assignment, ESP32 serial control, five rotary encoders, five PN532 readers, and a 25-LED NeoPixel strip.
 
-The playable demo audio comes from the local `DPI Music/` WAV stems. The source
-files are preserved untouched, and browser-friendly 96-second MP3 demo cuts live
-under:
+The interface is meant to be watched by people while the physical system is performed. The browser shows what each musical layer is doing, which card/reader is active, how loud each layer is, and how the hardware state maps into the mix.
 
-```text
-public/audio/dpi/
-```
+## Layer Map
 
-## Run
+| Layer | Color | Options |
+| --- | --- | --- |
+| 1. Foundation | Light blue | Bass Guitar, Bass Guitar B, Bouncy Synth Chords |
+| 2. Texture | Red | Synth Wavey, Brushed Snare, Ethereal Echo Thing |
+| 3. Drums | Yellow | Drum Simple, Drum Poom Tss, Drum w Duck |
+| 4. Keys | Dark blue | Piano 1, Piano 2, Piano 3 |
+| 5. Solo | Orange | Guitar Notes, Distort Guitar, Piano Solo |
+
+Audio is served from `public/audio/dpi/` as compressed 96-second MP3 demo stems. The original WAV/Audacity source files are not required to run the app.
+
+## Run Locally
 
 ```bash
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open the local URL printed by Vite.
-
-## Use
-
-- Use the Mix tab for the performance visualizer and channel controls.
-- Use the NFC Studio tab to assign reader slots and write NTAG cards to exact layer options.
-- Press Play to load and start the synced five-channel stem stack.
-- Select one option in each channel: Foundation, Texture, Drums, Keys, and Solo.
-- Use Randomize for a new five-layer combination.
-- Mute or adjust volume per channel.
-- Click programmed mock NFC tags to apply saved assignments, or press keys `1`, `2`, `3`, `4`, `5` to cycle layer options.
-- Use the ESP32 Connect control to attach the hardware serial controller when the board is plugged in.
-- In NFC Studio, choose a reader slot and option, connect ESP32, then use Write NTAG Card. Written cards store payloads like `dpi://v1/layer/drums/option/drum-w-duck`.
-
-## Channel Map
+Open:
 
 ```text
-Foundation  Bass Guitar, Bass Guitar B, Bouncy Synth Chords
-Texture     Synth Wavey, Brushed Snare, Ethereal Echo Thing
-Drums       Drum Simple, Drum Poom Tss, Drum w Duck
-Keys        Piano 1, Piano 2, Piano 3
-Solo        Guitar Notes, Distort Guitar, Piano Solo
+http://127.0.0.1:5173/
 ```
 
-## Architecture
+## Browser UI
+
+- `Mix` is the performance visualizer.
+- `NFC Studio` assigns each physical reader/card slot to one exact layer option.
+- `Play` starts the synced stem engine.
+- `Randomize` chooses one option per layer.
+- Layer controls adjust option, mute, and volume.
+- Keyboard keys `1` through `5` cycle the corresponding layer option for demo input.
+- `ESP32 Connect` opens Web Serial and listens to the physical controller.
+
+## Hardware Behavior
+
+The ESP32 firmware in `DPI_2.ino` handles:
+
+- PN532 NFC polling for five readers.
+- NFC card payload reads/writes using `dpi://v1/layer/<layer>/option/<option>`.
+- KY-040 rotary encoder volume using GPIO interrupts.
+- KY-040 button mute when `SW` is wired.
+- NeoPixel layer indicators on GPIO12.
+
+`SW` is optional for rotation. A KY-040 only needs `+`, `GND`, `CLK`, and `DT` to control volume.
+
+## Serial Events
+
+Important ESP32-to-browser lines:
 
 ```text
-src/audio/StemMusicEngine.ts  Tone.js sample players, loading, sync, progress
-src/data/layers.ts            Five-channel stem metadata and defaults
-src/data/nfcAssignments.ts    Persistent app-level NFC tag assignments
-src/input/MockNfcAdapter.ts   Keyboard mock adapter for keys 1-5
-src/input/HardwareInputAdapter.ts Web Serial parser/writer for ESP32 layer/tag/card events
-src/components/*              Visualizer, channel strips, transport, mock hardware UI
-public/audio/dpi/*            Compressed 96-second MP3 demo stems
-DPI_2.ino                     ESP32 firmware for 5 encoders + 5 PN532 readers
-docs/hardware-wiring.md       Wiring diagram and pin map
+TAG_PRESENT:<tagId>:<uid>
+TAG_REMOVED:<tagId>
+READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
+ENC:<layerId>:+1|-1
+VOLUME:<layerId>:<0-100>
+BUTTON:<layerId>:PRESS
+MUTE:<layerId>:0|1
+WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
+WRITE_UNVERIFIED:<tagId>:<uid>:<layerId>:<optionId>:<reason>
+WRITE_FAIL:<tagId>:<reason>
 ```
 
-All input paths keep the same event shape:
+Important browser-to-ESP32 lines:
 
-```ts
-{ layerId, optionId, source }
+```text
+WRITE:<tagId>:<layerId>:<optionId>
+VOLUME:<layerId>:<0-100>
+LED:<tagId>:off|ok|bad
+PLAY:0|1
 ```
 
-That keeps the UI and audio engine independent from the physical input transport.
+## Hardware Bring-Up
+
+1. Flash `DPI_2.ino`.
+2. Confirm the NeoPixel strip flashes all five layer colors at boot.
+3. Open the app and connect ESP32.
+4. Confirm PN532 readers report `found PN5...`.
+5. Rotate the Foundation encoder on GPIO32/GPIO33 and confirm `ENC:foundation` plus `VOLUME:foundation`.
+6. Place/write NFC cards from NFC Studio.
+7. Confirm the correct card on the correct reader opens the intended layer and lights the matching LED group.
+
+Detailed wiring is in [`docs/hardware-wiring.md`](docs/hardware-wiring.md).
+
+## Development
+
+```bash
+npm run build
+npm run lint
+arduino-cli compile --fqbn esp32:esp32:esp32 DPI_2.ino
+```
+
+## Source Structure
+
+```text
+src/audio/StemMusicEngine.ts        Tone.js synced stem players
+src/data/layers.ts                  Layer names, colors, options, audio metadata
+src/data/nfcAssignments.ts          NFC assignment persistence
+src/input/HardwareInputAdapter.ts   Web Serial protocol parser/writer
+src/components/                     Mix visualizer, NFC Studio, controls
+public/audio/dpi/                   Demo MP3 stems
+DPI_2.ino                           ESP32 firmware
+docs/hardware-wiring.md             Wiring map and bring-up checklist
+```
+
+## Notes
+
+- The physical LED strip is mapped in reverse order because the installed strip direction is opposite the UI order.
+- The app does not need a backend.
+- Web Serial requires a Chromium-based browser.
+- If flashing fails, disconnect the app from ESP32 and retry. If boot/flashing is still flaky, unplug NeoPixel DIN from GPIO12 during upload.

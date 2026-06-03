@@ -1,4 +1,5 @@
 ## Codex
+- Moved the old shape/color experiment into `archive/legacy-shape-fork` and rewrote the repo/current READMEs around the final DPI hardware demo.
 - Reversed the physical NeoPixel layer-group mapping so the installed strip order matches the UI colors despite opposite wiring direction.
 - Added a visible NeoPixel boot self-test and brighter idle center dots so LED wiring failures are obvious before app/NFC state is involved.
 - Switched ESP32 rotary encoder rotation from loop polling to GPIO interrupts and flashed the board so GPIO32/GPIO33 turns are captured during PN532 reads.
