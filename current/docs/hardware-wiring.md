@@ -137,15 +137,15 @@ If the app connects to the ESP32 but rotating an encoder prints no `ENC:<layer>:
 
 ## NeoPixel Strip Wiring
 
-The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs:
+The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs. This build has `NEOPIXEL_REVERSE_LAYER_ORDER` enabled because the installed strip runs opposite the UI order.
 
 | LEDs | Layer | Color |
 | --- | --- | --- |
-| 0-4 | Foundation / Reader 1 | Light blue |
-| 5-9 | Texture / Reader 2 | Red |
+| 0-4 | Solo / Reader 5 | Orange |
+| 5-9 | Keys / Reader 4 | Dark blue |
 | 10-14 | Drums / Reader 3 | Yellow |
-| 15-19 | Keys / Reader 4 | Dark blue |
-| 20-24 | Solo / Reader 5 | Orange |
+| 15-19 | Texture / Reader 2 | Red |
+| 20-24 | Foundation / Reader 1 | Light blue |
 
 Wire the strip like this:
 

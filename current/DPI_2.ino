@@ -59,6 +59,7 @@ constexpr uint8_t PN532_CS_SOLO = 0;
 constexpr uint8_t NEOPIXEL_PIN = 12;
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
+constexpr bool NEOPIXEL_REVERSE_LAYER_ORDER = true;
 constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 70;
 constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 35;
 constexpr uint8_t NEOPIXEL_SELF_TEST_PERCENT = 85;
@@ -270,6 +271,13 @@ static uint8_t getNeoPixelPulsePercent() {
          (((uint16_t)(NEOPIXEL_BREATHE_MAX_PERCENT - NEOPIXEL_BREATHE_MIN_PERCENT) * wave) / 255);
 }
 
+static uint16_t getLayerNeoPixelIndex(size_t layerIndex, uint8_t pixelOffset) {
+  const size_t physicalLayerIndex = NEOPIXEL_REVERSE_LAYER_ORDER
+                                        ? (LAYER_COUNT - 1 - layerIndex)
+                                        : layerIndex;
+  return (physicalLayerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
+}
+
 static void renderNeoPixels() {
   const uint8_t pulsePercent = transportPlaying ? getNeoPixelPulsePercent() : 100;
 
@@ -300,7 +308,7 @@ static void renderNeoPixels() {
     }
 
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
-      const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
+      const uint16_t pixelIndex = getLayerNeoPixelIndex(layerIndex, pixelOffset);
       if (pixelIndex < NEOPIXEL_COUNT) {
         if (centerOnly && pixelOffset != NEOPIXELS_PER_LAYER / 2) {
           layerPixels.setPixelColor(pixelIndex, 0, 0, 0);
@@ -323,7 +331,7 @@ static void showNeoPixelSelfTest() {
     const uint8_t blue = scaleColor(layer.blue, NEOPIXEL_SELF_TEST_PERCENT);
 
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
-      const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
+      const uint16_t pixelIndex = getLayerNeoPixelIndex(layerIndex, pixelOffset);
       if (pixelIndex < NEOPIXEL_COUNT) {
         layerPixels.setPixelColor(pixelIndex, red, green, blue);
       }
