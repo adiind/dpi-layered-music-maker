@@ -95,6 +95,9 @@ const createEmptyLayerTimers = () =>
     {} as Record<LayerId, ReturnType<typeof setTimeout> | null>,
   );
 
+const createEmptyLayerCounts = () =>
+  LAYER_ORDER.reduce((counts, layerId) => ({ ...counts, [layerId]: 0 }), {} as Record<LayerId, number>);
+
 const createEmptyReaderLayerMap = () =>
   NFC_TAG_IDS.reduce((presence, tagId) => ({ ...presence, [tagId]: null }), {} as Record<NfcTagId, LayerId | null>);
 
@@ -176,6 +179,8 @@ const App = () => {
   const nfcPresenceTimeoutsRef = useRef<Record<NfcTagId, ReturnType<typeof setTimeout> | null>>(createEmptyReaderTimers());
   const encoderVolumeFallbacksRef = useRef<Record<LayerId, ReturnType<typeof setTimeout> | null>>(createEmptyLayerTimers());
   const encoderMuteFallbacksRef = useRef<Record<LayerId, ReturnType<typeof setTimeout> | null>>(createEmptyLayerTimers());
+  const encoderVolumeFallbackStepsRef = useRef<Record<LayerId, number>>(createEmptyLayerCounts());
+  const encoderMuteFallbackPressesRef = useRef<Record<LayerId, number>>(createEmptyLayerCounts());
   const readerLedStatesRef = useRef<Record<NfcTagId, ReaderLedState>>(createEmptyReaderLedStates());
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -532,18 +537,28 @@ const App = () => {
       const encoderTurnEvent = parseEncoderTurnLine(line);
       const encoderButtonEvent = parseEncoderButtonLine(line);
 
-      const clearEncoderVolumeFallback = (layerId: LayerId) => {
+      const cancelEncoderVolumeFallbackTimer = (layerId: LayerId) => {
         const timeout = encoderVolumeFallbacksRef.current[layerId];
         if (!timeout) return;
         clearTimeout(timeout);
         encoderVolumeFallbacksRef.current = { ...encoderVolumeFallbacksRef.current, [layerId]: null };
       };
 
-      const clearEncoderMuteFallback = (layerId: LayerId) => {
+      const resetEncoderVolumeFallback = (layerId: LayerId) => {
+        cancelEncoderVolumeFallbackTimer(layerId);
+        encoderVolumeFallbackStepsRef.current = { ...encoderVolumeFallbackStepsRef.current, [layerId]: 0 };
+      };
+
+      const cancelEncoderMuteFallbackTimer = (layerId: LayerId) => {
         const timeout = encoderMuteFallbacksRef.current[layerId];
         if (!timeout) return;
         clearTimeout(timeout);
         encoderMuteFallbacksRef.current = { ...encoderMuteFallbacksRef.current, [layerId]: null };
+      };
+
+      const resetEncoderMuteFallback = (layerId: LayerId) => {
+        cancelEncoderMuteFallbackTimer(layerId);
+        encoderMuteFallbackPressesRef.current = { ...encoderMuteFallbackPressesRef.current, [layerId]: 0 };
       };
 
       const applyLayerVolume = (layerId: LayerId, volume: number, detail = `${Math.round(volume * 100)}% from encoder`) => {
@@ -571,19 +586,25 @@ const App = () => {
       };
 
       if (volumeEvent) {
-        clearEncoderVolumeFallback(volumeEvent.layerId);
+        resetEncoderVolumeFallback(volumeEvent.layerId);
         applyLayerVolume(volumeEvent.layerId, volumeEvent.volume);
       } else if (muteEvent) {
-        clearEncoderMuteFallback(muteEvent.layerId);
+        resetEncoderMuteFallback(muteEvent.layerId);
         applyLayerMute(muteEvent.layerId, muteEvent.muted);
       } else if (encoderTurnEvent) {
         const { direction, layerId } = encoderTurnEvent;
-        clearEncoderVolumeFallback(layerId);
+        cancelEncoderVolumeFallbackTimer(layerId);
+        const pendingSteps = encoderVolumeFallbackStepsRef.current[layerId] + direction;
+        encoderVolumeFallbackStepsRef.current = { ...encoderVolumeFallbackStepsRef.current, [layerId]: pendingSteps };
         encoderVolumeFallbacksRef.current = {
           ...encoderVolumeFallbacksRef.current,
           [layerId]: setTimeout(() => {
             encoderVolumeFallbacksRef.current = { ...encoderVolumeFallbacksRef.current, [layerId]: null };
-            const volume = clampVolume(volumesRef.current[layerId] + direction * ENCODER_VOLUME_STEP);
+            const steps = encoderVolumeFallbackStepsRef.current[layerId];
+            encoderVolumeFallbackStepsRef.current = { ...encoderVolumeFallbackStepsRef.current, [layerId]: 0 };
+            if (steps === 0) return;
+
+            const volume = clampVolume(volumesRef.current[layerId] + steps * ENCODER_VOLUME_STEP);
             if (mutesRef.current[layerId]) {
               applyLayerMute(layerId, false, "Encoder turn fallback unmuted layer");
             }
@@ -592,12 +613,18 @@ const App = () => {
         };
       } else if (encoderButtonEvent) {
         const { layerId } = encoderButtonEvent;
-        clearEncoderMuteFallback(layerId);
+        cancelEncoderMuteFallbackTimer(layerId);
+        const pendingPresses = encoderMuteFallbackPressesRef.current[layerId] + 1;
+        encoderMuteFallbackPressesRef.current = { ...encoderMuteFallbackPressesRef.current, [layerId]: pendingPresses };
         encoderMuteFallbacksRef.current = {
           ...encoderMuteFallbacksRef.current,
           [layerId]: setTimeout(() => {
             encoderMuteFallbacksRef.current = { ...encoderMuteFallbacksRef.current, [layerId]: null };
-            applyLayerMute(layerId, !mutesRef.current[layerId], "Encoder button fallback");
+            const presses = encoderMuteFallbackPressesRef.current[layerId];
+            encoderMuteFallbackPressesRef.current = { ...encoderMuteFallbackPressesRef.current, [layerId]: 0 };
+            if (presses % 2 === 1) {
+              applyLayerMute(layerId, !mutesRef.current[layerId], "Encoder button fallback");
+            }
           }, ENCODER_FALLBACK_DELAY_MS),
         };
       } else if (readerStartMatch) {
@@ -1034,6 +1061,8 @@ const App = () => {
       });
       encoderVolumeFallbacksRef.current = createEmptyLayerTimers();
       encoderMuteFallbacksRef.current = createEmptyLayerTimers();
+      encoderVolumeFallbackStepsRef.current = createEmptyLayerCounts();
+      encoderMuteFallbackPressesRef.current = createEmptyLayerCounts();
       clearNfcPresence();
       void adapter.disconnect();
       hardwareAdapterRef.current = null;

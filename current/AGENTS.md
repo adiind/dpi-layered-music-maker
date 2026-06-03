@@ -1,4 +1,5 @@
 ## Codex
+- Made encoder diagnostic fallbacks accumulate pending turns/buttons and documented that KY-040 `SW` is optional for rotation plus the one-encoder GPIO32/GPIO33 test path.
 - Guarded encoder diagnostic serial handling so `ENC` and `BUTTON` only act as delayed fallbacks when authoritative `VOLUME` and `MUTE` lines do not arrive.
 - Recolored the five demo layers across the UI and NeoPixel firmware to light blue, red, yellow, dark blue, and orange in order.
 - Added NeoPixel idle center glow, volume-colored full-strip valid card state, and local beat-breathing animation driven by browser PLAY commands.

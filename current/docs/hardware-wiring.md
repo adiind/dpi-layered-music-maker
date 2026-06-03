@@ -121,7 +121,7 @@ GPIO0, GPIO2, GPIO4, GPIO5, and GPIO15 are ESP32 boot strapping pins. They are u
 
 ## Encoder Wiring
 
-Wire every KY-040 `VCC` pin to ESP32 `3V3`, and every `GND` pin to ESP32 `GND`.
+Wire every KY-040 `VCC` or `+` pin to ESP32 `3V3`, and every `GND` pin to ESP32 `GND`. `SW` is only the push button used for mute; rotation works without `SW` connected.
 
 | Layer | KY-040 CLK | KY-040 DT | KY-040 SW | Firmware layer id |
 | --- | ---: | ---: | ---: | --- |
@@ -133,17 +133,19 @@ Wire every KY-040 `VCC` pin to ESP32 `3V3`, and every `GND` pin to ESP32 `GND`.
 
 GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide internal pullups. They are only used for encoder CLK/DT signals here. If the Keys or Solo encoders feel unstable, add external 10k pullup resistors from those CLK/DT lines to 3V3.
 
+If the app connects to the ESP32 but rotating an encoder prints no `ENC:<layer>:+1/-1` or `VOLUME:<layer>:<0-100>` lines in Hardware Feed, test only the Foundation encoder first: `+` to `3V3`, `GND` to `GND`, `CLK` to GPIO32, and `DT` to GPIO33. If that still prints nothing, check the KY-040 pin labels, common ground, power, and screw-terminal row before debugging the browser UI.
+
 ## NeoPixel Strip Wiring
 
 The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs:
 
 | LEDs | Layer | Color |
 | --- | --- | --- |
-| 0-4 | Foundation / Reader 1 | Yellow |
-| 5-9 | Texture / Reader 2 | Orange |
-| 10-14 | Drums / Reader 3 | Red |
-| 15-19 | Keys / Reader 4 | Green |
-| 20-24 | Solo / Reader 5 | Blue |
+| 0-4 | Foundation / Reader 1 | Light blue |
+| 5-9 | Texture / Reader 2 | Red |
+| 10-14 | Drums / Reader 3 | Yellow |
+| 15-19 | Keys / Reader 4 | Dark blue |
+| 20-24 | Solo / Reader 5 | Orange |
 
 Wire the strip like this:
 
