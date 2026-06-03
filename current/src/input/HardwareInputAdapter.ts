@@ -354,6 +354,15 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     await this.writer.write(new TextEncoder().encode(command));
   }
 
+  async setTransportPlaying(playing: boolean) {
+    if (!this.port || !this.writer) {
+      return;
+    }
+
+    const command = `PLAY:${playing ? 1 : 0}\n`;
+    await this.writer.write(new TextEncoder().encode(command));
+  }
+
   async requestAndConnect(options?: WebSerialNfcRequestOptions) {
     const serial = getSerial();
     if (!serial) {

@@ -163,6 +163,7 @@ const App = () => {
   const readerLedStatesRef = useRef<Record<NfcTagId, ReaderLedState>>(createEmptyReaderLedStates());
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isPlayingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAudioStarting, setIsAudioStarting] = useState(false);
   const [hardwareStatus, setHardwareStatus] = useState<InputConnectionStatus>(INITIAL_HARDWARE_STATUS);
@@ -200,6 +201,10 @@ const App = () => {
     mutesRef.current = mutes;
   }, [mutes]);
 
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
   const sendLayerVolumeToHardware = useCallback((layerId: LayerId, volume: number, muted = mutesRef.current[layerId]) => {
     void hardwareAdapterRef.current?.setLayerVolume(layerId, muted ? 0 : volume);
   }, []);
@@ -224,6 +229,10 @@ const App = () => {
     NFC_TAG_IDS.forEach((tagId) => {
       void hardwareAdapterRef.current?.setReaderLed(tagId, readerLedStatesRef.current[tagId]);
     });
+  }, []);
+
+  const sendTransportToHardware = useCallback((playing = isPlayingRef.current) => {
+    void hardwareAdapterRef.current?.setTransportPlaying(playing);
   }, []);
 
   const syncNfcPresenceFromReaders = useCallback(() => {
@@ -476,6 +485,7 @@ const App = () => {
         });
         syncHardwareVolumes();
         syncReaderLeds();
+        sendTransportToHardware();
       }
 
       if (status.state === "disconnected" || status.state === "disconnecting") {
@@ -962,7 +972,7 @@ const App = () => {
       void adapter.disconnect();
       hardwareAdapterRef.current = null;
     };
-  }, [clearNfcPresence, closeReaderPresence, markReaderHeartbeat, setReaderLedStatus, syncHardwareVolumes, syncReaderLeds]);
+  }, [clearNfcPresence, closeReaderPresence, markReaderHeartbeat, sendTransportToHardware, setReaderLedStatus, syncHardwareVolumes, syncReaderLeds]);
 
   useEffect(() => {
     const adapter = new KeyboardNfcMockAdapter(resolveNextOption);
@@ -1126,14 +1136,18 @@ const App = () => {
 
     if (isPlaying) {
       engine.stop();
+      isPlayingRef.current = false;
       setIsPlaying(false);
+      sendTransportToHardware(false);
       return;
     }
 
     setIsAudioStarting(true);
     try {
       await engine.start();
+      isPlayingRef.current = engine.isRunning;
       setIsPlaying(engine.isRunning);
+      sendTransportToHardware(engine.isRunning);
       const liveLayerCount = Object.values(nfcPresenceRef.current).filter(Boolean).length;
       setLastInputLabel(
         liveLayerCount > 0

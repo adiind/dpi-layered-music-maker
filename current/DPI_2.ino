@@ -10,6 +10,7 @@
 //   WRITE:<tagId>:<layerId>:<optionId>
 //   VOLUME:<layerId>:<0-100>
 //   LED:<tagId>:off|ok|bad
+//   PLAY:0|1
 //
 // App-readable serial events:
 //   LAYER:<layerId>:<optionId>
@@ -58,6 +59,11 @@ constexpr uint8_t NEOPIXEL_PIN = 12;
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
 constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 70;
+constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 14;
+constexpr uint8_t NEOPIXEL_BREATHE_MIN_PERCENT = 38;
+constexpr uint8_t NEOPIXEL_BREATHE_MAX_PERCENT = 115;
+constexpr uint16_t NEOPIXEL_BREATHE_PERIOD_MS = 500;
+constexpr uint16_t NEOPIXEL_FRAME_MS = 33;
 
 Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
 Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
@@ -136,7 +142,9 @@ uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
 bool layerMuted[LAYER_COUNT] = {false, false, false, false, false};
 bool layerTagPresent[LAYER_COUNT] = {false, false, false, false, false};
 bool layerLedError[LAYER_COUNT] = {false, false, false, false, false};
+bool transportPlaying = false;
 size_t nextNfcReaderIndex = 0;
+uint32_t lastNeoPixelFrameMs = 0;
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -181,23 +189,69 @@ static uint8_t scaleColor(uint8_t value, uint8_t volumePercent) {
   return ((uint16_t)value * scaledBrightness) / 255;
 }
 
+static uint8_t getNeoPixelPulsePercent() {
+  const uint16_t phase = millis() % NEOPIXEL_BREATHE_PERIOD_MS;
+  const uint16_t halfPeriod = NEOPIXEL_BREATHE_PERIOD_MS / 2;
+  const uint16_t wave = phase < halfPeriod
+                            ? ((uint32_t)phase * 255) / halfPeriod
+                            : ((uint32_t)(NEOPIXEL_BREATHE_PERIOD_MS - phase) * 255) / halfPeriod;
+  return NEOPIXEL_BREATHE_MIN_PERCENT +
+         (((uint16_t)(NEOPIXEL_BREATHE_MAX_PERCENT - NEOPIXEL_BREATHE_MIN_PERCENT) * wave) / 255);
+}
+
 static void renderNeoPixels() {
+  const uint8_t pulsePercent = transportPlaying ? getNeoPixelPulsePercent() : 100;
+
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
-    const uint8_t volume = layerMuted[layerIndex] || !layerTagPresent[layerIndex] ? 0 : layerVolumes[layerIndex];
-    const uint8_t red = layerLedError[layerIndex] ? scaleColor(255, 100) : scaleColor(layer.red, volume);
-    const uint8_t green = layerLedError[layerIndex] ? 0 : scaleColor(layer.green, volume);
-    const uint8_t blue = layerLedError[layerIndex] ? 0 : scaleColor(layer.blue, volume);
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 0;
+    bool centerOnly = false;
+
+    if (layerLedError[layerIndex]) {
+      red = scaleColor(255, 100);
+    } else if (!layerTagPresent[layerIndex]) {
+      centerOnly = true;
+      red = scaleColor(layer.red, NEOPIXEL_IDLE_CENTER_PERCENT);
+      green = scaleColor(layer.green, NEOPIXEL_IDLE_CENTER_PERCENT);
+      blue = scaleColor(layer.blue, NEOPIXEL_IDLE_CENTER_PERCENT);
+    } else {
+      const uint8_t baseVolume = layerMuted[layerIndex] ? 0 : layerVolumes[layerIndex];
+      uint16_t pulsedVolume = transportPlaying ? ((uint16_t)baseVolume * pulsePercent) / 100 : baseVolume;
+      if (pulsedVolume > 100) {
+        pulsedVolume = 100;
+      }
+      const uint8_t volume = (uint8_t)pulsedVolume;
+      red = scaleColor(layer.red, volume);
+      green = scaleColor(layer.green, volume);
+      blue = scaleColor(layer.blue, volume);
+    }
 
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
       const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
       if (pixelIndex < NEOPIXEL_COUNT) {
-        layerPixels.setPixelColor(pixelIndex, red, green, blue);
+        if (centerOnly && pixelOffset != NEOPIXELS_PER_LAYER / 2) {
+          layerPixels.setPixelColor(pixelIndex, 0, 0, 0);
+        } else {
+          layerPixels.setPixelColor(pixelIndex, red, green, blue);
+        }
       }
     }
   }
 
   layerPixels.show();
+  lastNeoPixelFrameMs = millis();
+}
+
+static void updateNeoPixelAnimation() {
+  if (!transportPlaying) {
+    return;
+  }
+
+  if (millis() - lastNeoPixelFrameMs >= NEOPIXEL_FRAME_MS) {
+    renderNeoPixels();
+  }
 }
 
 static void setReaderLayerPresence(const NfcReaderState &readerState, bool present) {
@@ -986,6 +1040,27 @@ static void handleLedCommand(const String &command) {
   }
 }
 
+static void handlePlayCommand(const String &command) {
+  const int firstSeparator = command.indexOf(':');
+  if (firstSeparator < 0) {
+    Serial.println("PLAY_FAIL:bad-command");
+    return;
+  }
+
+  const String state = command.substring(firstSeparator + 1);
+  if (state == "1") {
+    transportPlaying = true;
+  } else if (state == "0") {
+    transportPlaying = false;
+  } else {
+    Serial.print("PLAY_FAIL:");
+    Serial.println(state);
+    return;
+  }
+
+  renderNeoPixels();
+}
+
 static void handleSerialCommand(const String &command) {
   if (command.length() == 0) {
     return;
@@ -997,6 +1072,8 @@ static void handleSerialCommand(const String &command) {
     handleVolumeCommand(command);
   } else if (command.startsWith("LED:")) {
     handleLedCommand(command);
+  } else if (command.startsWith("PLAY:")) {
+    handlePlayCommand(command);
   }
 }
 
@@ -1172,7 +1249,7 @@ void setup() {
   Serial.println();
   Serial.println("DPI ESP32 layer controller");
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
-  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>, LED:<tagId>:off|ok|bad");
+  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>, LED:<tagId>:off|ok|bad, PLAY:0|1");
 
   layerPixels.begin();
   layerPixels.clear();
@@ -1214,5 +1291,6 @@ void loop() {
   readSerialCommands();
   readEncoders();
   readNfcReaders();
+  updateNeoPixelAnimation();
   delay(2);
 }

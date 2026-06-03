@@ -1,4 +1,5 @@
 ## Codex
+- Added NeoPixel idle center glow, volume-colored full-strip valid card state, and local beat-breathing animation driven by browser PLAY commands.
 - Added wrong-reader rejection so mismatched NFC card payloads do not play and ESP32 reader LED groups can be commanded red.
 - Added browser-side NFC presence timeouts so layers turn off when older firmware stops sending tag/read heartbeats after card removal.
 - Stopped raw NFC UID repeat lines from reapplying default slot options so DPI card payloads like Drum w Duck no longer reset every second.
