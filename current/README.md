@@ -1,6 +1,6 @@
 # DPI Final Demo Visualizer
 
-`current/` is the active DPI final demo: a five-channel music-layer visualizer with real DPI Music stems, NFC card assignment, ESP32 serial control, five rotary encoders, five PN532 readers, and a 25-LED NeoPixel strip.
+This is the active DPI final demo: a five-channel music-layer visualizer with real DPI Music stems, NFC card assignment, ESP32 serial control, five rotary encoders, five PN532 readers, and a 25-LED NeoPixel strip.
 
 The interface is meant to be watched by people while the physical system is performed. The browser shows what each musical layer is doing, which card/reader is active, how loud each layer is, and how the hardware state maps into the mix.
 
@@ -14,7 +14,7 @@ The interface is meant to be watched by people while the physical system is perf
 | 4. Keys | Dark blue | Piano 1, Piano 2, Piano 3 |
 | 5. Solo | Orange | Guitar Notes, Distort Guitar, Piano Solo |
 
-Audio is served from `public/audio/dpi/` as compressed 96-second MP3 demo stems. The original WAV/Audacity source files are not required to run the app.
+Audio is served from `public/audio/dpi/` as compressed 96-second MP3 demo stems. The original WAV/Audacity source files are preserved in `DPI Music/` and are not required to run the app.
 
 ## Run Locally
 
@@ -50,33 +50,7 @@ The ESP32 firmware in `DPI_2.ino` handles:
 - NeoPixel layer indicators on GPIO12 / P12.
 
 `SW` is optional for rotation. A KY-040 only needs `+`, `GND`, `CLK`, and `DT` to control volume.
-Encoders 2 through 5 are direction-corrected in firmware for the current physical wiring.
-
-## Serial Events
-
-Important ESP32-to-browser lines:
-
-```text
-TAG_PRESENT:<tagId>:<uid>
-TAG_REMOVED:<tagId>
-READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
-ENC:<layerId>:+1|-1
-VOLUME:<layerId>:<0-100>
-BUTTON:<layerId>:PRESS
-MUTE:<layerId>:0|1
-WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
-WRITE_UNVERIFIED:<tagId>:<uid>:<layerId>:<optionId>:<reason>
-WRITE_FAIL:<tagId>:<reason>
-```
-
-Important browser-to-ESP32 lines:
-
-```text
-WRITE:<tagId>:<layerId>:<optionId>
-VOLUME:<layerId>:<0-100>
-LED:<tagId>:off|ok|bad
-PLAY:0|1
-```
+This saved firmware snapshot prioritizes the stable NFC reader setup that was confirmed on the physical rig.
 
 ## Hardware Bring-Up
 

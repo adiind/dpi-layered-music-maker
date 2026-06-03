@@ -538,6 +538,24 @@ const App = () => {
       }));
     };
 
+    const updateReaderStatusUnlessPayloadKnown = (tagId: NfcTagId, uid: string | undefined, status: Omit<NfcReaderStatus, "tagId">) => {
+      setReaderStatuses((current) => {
+        const previous = current[tagId];
+        const sameUid = !uid || !previous.uid || previous.uid === uid;
+        if (previous.state === "tag-assigned" && previous.payload && sameUid) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [tagId]: {
+            tagId,
+            ...status,
+          },
+        };
+      });
+    };
+
     const disconnectInput = adapter.connect((event) => {
       if (event.tagId) {
         const layer = getLayer(event.layerId);
@@ -762,7 +780,7 @@ const App = () => {
           if (currentLayerId) {
             markReaderHeartbeat(tagId, currentLayerId);
           } else {
-            updateReaderStatus(tagId, {
+            updateReaderStatusUnlessPayloadKnown(tagId, uid, {
               state: "tag-unassigned",
               title: `${getReaderLabel(tagId)} card detected`,
               detail: uid
@@ -797,7 +815,7 @@ const App = () => {
             markReaderHeartbeat(tagId, currentLayerId);
           }
 
-          updateReaderStatus(tagId, {
+          updateReaderStatusUnlessPayloadKnown(tagId, uid, {
             state: currentLayerId ? "tag-assigned" : "tag-unassigned",
             title: `${getReaderLabel(tagId)} checking tag`,
             detail: uid

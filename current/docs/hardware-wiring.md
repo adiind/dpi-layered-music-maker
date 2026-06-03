@@ -133,7 +133,7 @@ Wire every KY-040 `VCC` or `+` pin to ESP32 `3V3`, and every `GND` pin to ESP32 
 
 GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide internal pullups. They are only used for encoder CLK/DT signals here. If the Keys or Solo encoders feel unstable, add external 10k pullup resistors from those CLK/DT lines to 3V3.
 
-The firmware reverses the rotation direction for encoders 2 through 5 so the physical direction matches the UI volume direction with the current wiring.
+This saved firmware snapshot prioritizes the stable NFC reader setup confirmed on the physical rig. If an encoder direction is physically reversed, swap that encoder's `CLK` and `DT` wires after confirming NFC remains stable.
 
 If the app connects to the ESP32 but rotating an encoder prints no `ENC:<layer>:+1/-1` or `VOLUME:<layer>:<0-100>` lines in Hardware Feed, test only the Foundation encoder first: `+` to `3V3`, `GND` to `GND`, `CLK` to GPIO32, and `DT` to GPIO33. If that still prints nothing, check the KY-040 pin labels, common ground, power, and screw-terminal row before debugging the browser UI.
 

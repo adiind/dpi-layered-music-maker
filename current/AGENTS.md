@@ -1,10 +1,15 @@
 ## Codex
+- Saved the confirmed working flashed firmware snapshot from commit c400742 and current NFC Studio UI fixes to GitHub.
+- Rolled ESP32 firmware back to the known-stable NFC snapshot from commit c400742 after experimental LED/NFC flashes broke reader recognition.
+- Removed the saved-UID option shortcut so raw NFC heartbeats cannot fight card payloads between options like Keys 1 and 3.
+- Let NFC Studio apply saved same-slot UID assignments immediately while waiting for slower DPI payload verification.
+- Stopped raw NFC UID heartbeats from overwriting a known DPI card payload in the NFC Studio reader status.
 - Reversed firmware volume direction for encoders 2-5 and tuned PN532 polling/removal windows for steadier NTAG recognition.
 - Made DPI card payload reads the only NFC path that can change layer options, preventing stale UID assignments from fighting Piano 1/2 with Piano 3.
 - Added a Mix-tab hardware button visualizer where encoder SW presses and on-screen button pads toggle each layer between playing and paused.
 - Fixed NFC card recognition so valid DPI payloads override stale saved UIDs, successful rewrites save the new UID, and changing a slot clears the old UID.
 - Added NFC anti-stutter handling with duplicate card-read suppression, delayed removal confirmation, longer firmware removal tolerance, and a boot line reporting reversed NeoPixel order.
-- Moved the old shape/color experiment into `archive/legacy-shape-fork` and rewrote the repo/current READMEs around the final DPI hardware demo.
+- Moved the old shape/color experiment into the GitHub repo archive and rewrote the repo/current READMEs around the final DPI hardware demo.
 - Reversed the physical NeoPixel layer-group mapping so the installed strip order matches the UI colors despite opposite wiring direction.
 - Added a visible NeoPixel boot self-test and brighter idle center dots so LED wiring failures are obvious before app/NFC state is involved.
 - Switched ESP32 rotary encoder rotation from loop polling to GPIO interrupts and flashed the board so GPIO32/GPIO33 turns are captured during PN532 reads.
