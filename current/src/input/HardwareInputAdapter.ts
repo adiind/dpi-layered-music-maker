@@ -51,6 +51,25 @@ interface KnownTagRead {
   uid?: string;
 }
 
+export interface LayerVolumeEvent {
+  layerId: LayerId;
+  volume: number;
+}
+
+export interface LayerMuteEvent {
+  layerId: LayerId;
+  muted: boolean;
+}
+
+export interface EncoderTurnEvent {
+  layerId: LayerId;
+  direction: -1 | 1;
+}
+
+export interface EncoderButtonEvent {
+  layerId: LayerId;
+}
+
 export const parseNfcUidLine = (line: string) => {
   const match = line.match(/^\s*UID:\s*([0-9a-fA-F][0-9a-fA-F:\-\s]*)\s*$/);
   if (!match) return undefined;
@@ -78,6 +97,57 @@ export const parseLayerSelectionLine = (line: string): LayerInputEvent | undefin
     optionId,
     source: "hardware",
   };
+};
+
+export const parseLayerVolumeLine = (line: string): LayerVolumeEvent | undefined => {
+  const match = line.match(/^\s*VOLUME:\s*([a-z0-9-]+)\s*:\s*(\d{1,3})%?\s*$/i);
+  if (!match) return undefined;
+
+  const layerId = match[1].toLowerCase();
+  if (!isLayerId(layerId)) return undefined;
+
+  return {
+    layerId,
+    volume: Math.max(0, Math.min(1, Number(match[2]) / 100)),
+  };
+};
+
+export const parseLayerMuteLine = (line: string): LayerMuteEvent | undefined => {
+  const match = line.match(/^\s*MUTE:\s*([a-z0-9-]+)\s*:\s*(0|1|true|false|on|off|muted|unmuted)\s*$/i);
+  if (!match) return undefined;
+
+  const layerId = match[1].toLowerCase();
+  if (!isLayerId(layerId)) return undefined;
+
+  const value = match[2].toLowerCase();
+  return {
+    layerId,
+    muted: value === "1" || value === "true" || value === "on" || value === "muted",
+  };
+};
+
+export const parseEncoderTurnLine = (line: string): EncoderTurnEvent | undefined => {
+  const match = line.match(/^\s*(?:ENC|ENCODER):\s*([a-z0-9-]+)\s*:\s*([+-]?1|cw|ccw)\s*$/i);
+  if (!match) return undefined;
+
+  const layerId = match[1].toLowerCase();
+  if (!isLayerId(layerId)) return undefined;
+
+  const value = match[2].toLowerCase();
+  return {
+    layerId,
+    direction: value === "-1" || value === "ccw" ? -1 : 1,
+  };
+};
+
+export const parseEncoderButtonLine = (line: string): EncoderButtonEvent | undefined => {
+  const match = line.match(/^\s*(?:BUTTON|BTN):\s*([a-z0-9-]+)\s*:\s*PRESS\s*$/i);
+  if (!match) return undefined;
+
+  const layerId = match[1].toLowerCase();
+  if (!isLayerId(layerId)) return undefined;
+
+  return { layerId };
 };
 
 export const parseKnownTagLine = (line: string): KnownTagRead | undefined => {

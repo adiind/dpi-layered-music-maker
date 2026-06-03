@@ -1,4 +1,5 @@
 ## Codex
+- Guarded encoder diagnostic serial handling so `ENC` and `BUTTON` only act as delayed fallbacks when authoritative `VOLUME` and `MUTE` lines do not arrive.
 - Recolored the five demo layers across the UI and NeoPixel firmware to light blue, red, yellow, dark blue, and orange in order.
 - Added NeoPixel idle center glow, volume-colored full-strip valid card state, and local beat-breathing animation driven by browser PLAY commands.
 - Added wrong-reader rejection so mismatched NFC card payloads do not play and ESP32 reader LED groups can be commanded red.

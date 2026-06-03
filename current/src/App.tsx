@@ -27,7 +27,14 @@ import {
   updateNfcAssignment,
   updateNfcAssignmentUid,
 } from "./data/nfcAssignments";
-import { HardwareInputAdapter, isWebSerialNfcSupported } from "./input/HardwareInputAdapter";
+import {
+  HardwareInputAdapter,
+  isWebSerialNfcSupported,
+  parseEncoderButtonLine,
+  parseEncoderTurnLine,
+  parseLayerMuteLine,
+  parseLayerVolumeLine,
+} from "./input/HardwareInputAdapter";
 import type { InputConnectionStatus } from "./input/InputAdapter";
 import { KeyboardNfcMockAdapter } from "./input/MockNfcAdapter";
 import type {
@@ -57,6 +64,8 @@ interface InputEventOptions {
 type ReaderLedState = "off" | "ok" | "bad";
 
 const NFC_BROWSER_PRESENCE_TIMEOUT_MS = 3400;
+const ENCODER_VOLUME_STEP = 0.04;
+const ENCODER_FALLBACK_DELAY_MS = 80;
 
 const formatNow = () =>
   new Date().toLocaleTimeString([], {
@@ -74,14 +83,17 @@ const getReaderLabel = (tagId: NfcTagId) => `Reader ${getReaderNumber(tagId)}`;
 const isNfcTagId = (value: string): value is NfcTagId =>
   NFC_TAG_IDS.includes(value as NfcTagId);
 
-const isLayerId = (value: string): value is LayerId =>
-  LAYER_ORDER.includes(value as LayerId);
-
 const createEmptyLayerLevels = () =>
   LAYER_ORDER.reduce((levels, layerId) => ({ ...levels, [layerId]: 0 }), {} as LayerLevelState);
 
 const createEmptyNfcPresence = () =>
   LAYER_ORDER.reduce((presence, layerId) => ({ ...presence, [layerId]: false }), {} as Record<LayerId, boolean>);
+
+const createEmptyLayerTimers = () =>
+  LAYER_ORDER.reduce(
+    (timers, layerId) => ({ ...timers, [layerId]: null }),
+    {} as Record<LayerId, ReturnType<typeof setTimeout> | null>,
+  );
 
 const createEmptyReaderLayerMap = () =>
   NFC_TAG_IDS.reduce((presence, tagId) => ({ ...presence, [tagId]: null }), {} as Record<NfcTagId, LayerId | null>);
@@ -149,6 +161,8 @@ const formatTime = (seconds: number) => {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 };
 
+const clampVolume = (volume: number) => Math.max(0, Math.min(1, volume));
+
 const App = () => {
   const engineRef = useRef<StemMusicEngine | null>(null);
   const hardwareAdapterRef = useRef<HardwareInputAdapter | null>(null);
@@ -160,6 +174,8 @@ const App = () => {
   const nfcPresenceRef = useRef<Record<LayerId, boolean>>(createEmptyNfcPresence());
   const activeReaderLayersRef = useRef<Record<NfcTagId, LayerId | null>>(createEmptyReaderLayerMap());
   const nfcPresenceTimeoutsRef = useRef<Record<NfcTagId, ReturnType<typeof setTimeout> | null>>(createEmptyReaderTimers());
+  const encoderVolumeFallbacksRef = useRef<Record<LayerId, ReturnType<typeof setTimeout> | null>>(createEmptyLayerTimers());
+  const encoderMuteFallbacksRef = useRef<Record<LayerId, ReturnType<typeof setTimeout> | null>>(createEmptyLayerTimers());
   const readerLedStatesRef = useRef<Record<NfcTagId, ReaderLedState>>(createEmptyReaderLedStates());
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -511,37 +527,79 @@ const App = () => {
       const tagReadMatch = line.match(/^TAG:\s*(tag-[1-5])\s*:?\s*([0-9a-fA-F:\-\s]*)/i);
       const tagPresentMatch = line.match(/^TAG_PRESENT:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*$/i);
       const tagRemovedMatch = line.match(/^TAG_REMOVED:\s*(tag-[1-5])\s*$/i);
-      const volumeMatch = line.match(/^VOLUME:\s*([a-z0-9-]+)\s*:\s*(\d{1,3})\s*$/i);
-      const muteMatch = line.match(/^MUTE:\s*([a-z0-9-]+)\s*:\s*([01])\s*$/i);
+      const volumeEvent = parseLayerVolumeLine(line);
+      const muteEvent = parseLayerMuteLine(line);
+      const encoderTurnEvent = parseEncoderTurnLine(line);
+      const encoderButtonEvent = parseEncoderButtonLine(line);
 
-      if (volumeMatch) {
-        const layerId = volumeMatch[1].toLowerCase();
-        if (isLayerId(layerId)) {
-          const volume = Math.max(0, Math.min(1, Number(volumeMatch[2]) / 100));
-          volumesRef.current = { ...volumesRef.current, [layerId]: volume };
-          setVolumes(volumesRef.current);
-          engineRef.current?.setVolume(layerId, volume);
-          setHardwareActivity({
-            kind: "serial",
-            title: `${getLayer(layerId)?.name ?? layerId} volume`,
-            detail: `${Math.round(volume * 100)}% from encoder`,
-            atLabel: nowLabel,
-          });
-        }
-      } else if (muteMatch) {
-        const layerId = muteMatch[1].toLowerCase();
-        if (isLayerId(layerId)) {
-          const muted = muteMatch[2] === "1";
-          mutesRef.current = { ...mutesRef.current, [layerId]: muted };
-          setMutes(mutesRef.current);
-          engineRef.current?.setMuted(layerId, muted);
-          setHardwareActivity({
-            kind: "serial",
-            title: `${getLayer(layerId)?.name ?? layerId} ${muted ? "muted" : "unmuted"}`,
-            detail: "Encoder button press",
-            atLabel: nowLabel,
-          });
-        }
+      const clearEncoderVolumeFallback = (layerId: LayerId) => {
+        const timeout = encoderVolumeFallbacksRef.current[layerId];
+        if (!timeout) return;
+        clearTimeout(timeout);
+        encoderVolumeFallbacksRef.current = { ...encoderVolumeFallbacksRef.current, [layerId]: null };
+      };
+
+      const clearEncoderMuteFallback = (layerId: LayerId) => {
+        const timeout = encoderMuteFallbacksRef.current[layerId];
+        if (!timeout) return;
+        clearTimeout(timeout);
+        encoderMuteFallbacksRef.current = { ...encoderMuteFallbacksRef.current, [layerId]: null };
+      };
+
+      const applyLayerVolume = (layerId: LayerId, volume: number, detail = `${Math.round(volume * 100)}% from encoder`) => {
+        volumesRef.current = { ...volumesRef.current, [layerId]: volume };
+        setVolumes(volumesRef.current);
+        engineRef.current?.setVolume(layerId, volume);
+        setHardwareActivity({
+          kind: "serial",
+          title: `${getLayer(layerId)?.name ?? layerId} volume`,
+          detail,
+          atLabel: nowLabel,
+        });
+      };
+
+      const applyLayerMute = (layerId: LayerId, muted: boolean, detail = "Encoder button press") => {
+        mutesRef.current = { ...mutesRef.current, [layerId]: muted };
+        setMutes(mutesRef.current);
+        engineRef.current?.setMuted(layerId, muted);
+        setHardwareActivity({
+          kind: "serial",
+          title: `${getLayer(layerId)?.name ?? layerId} ${muted ? "muted" : "unmuted"}`,
+          detail,
+          atLabel: nowLabel,
+        });
+      };
+
+      if (volumeEvent) {
+        clearEncoderVolumeFallback(volumeEvent.layerId);
+        applyLayerVolume(volumeEvent.layerId, volumeEvent.volume);
+      } else if (muteEvent) {
+        clearEncoderMuteFallback(muteEvent.layerId);
+        applyLayerMute(muteEvent.layerId, muteEvent.muted);
+      } else if (encoderTurnEvent) {
+        const { direction, layerId } = encoderTurnEvent;
+        clearEncoderVolumeFallback(layerId);
+        encoderVolumeFallbacksRef.current = {
+          ...encoderVolumeFallbacksRef.current,
+          [layerId]: setTimeout(() => {
+            encoderVolumeFallbacksRef.current = { ...encoderVolumeFallbacksRef.current, [layerId]: null };
+            const volume = clampVolume(volumesRef.current[layerId] + direction * ENCODER_VOLUME_STEP);
+            if (mutesRef.current[layerId]) {
+              applyLayerMute(layerId, false, "Encoder turn fallback unmuted layer");
+            }
+            applyLayerVolume(layerId, volume, `${Math.round(volume * 100)}% from encoder fallback`);
+          }, ENCODER_FALLBACK_DELAY_MS),
+        };
+      } else if (encoderButtonEvent) {
+        const { layerId } = encoderButtonEvent;
+        clearEncoderMuteFallback(layerId);
+        encoderMuteFallbacksRef.current = {
+          ...encoderMuteFallbacksRef.current,
+          [layerId]: setTimeout(() => {
+            encoderMuteFallbacksRef.current = { ...encoderMuteFallbacksRef.current, [layerId]: null };
+            applyLayerMute(layerId, !mutesRef.current[layerId], "Encoder button fallback");
+          }, ENCODER_FALLBACK_DELAY_MS),
+        };
       } else if (readerStartMatch) {
         const tagId = readerStartMatch[1].toLowerCase();
         if (isNfcTagId(tagId)) {
@@ -968,6 +1026,14 @@ const App = () => {
       disconnectStatus();
       disconnectLines();
       disconnectCardEvents();
+      LAYER_ORDER.forEach((layerId) => {
+        const volumeTimeout = encoderVolumeFallbacksRef.current[layerId];
+        const muteTimeout = encoderMuteFallbacksRef.current[layerId];
+        if (volumeTimeout) clearTimeout(volumeTimeout);
+        if (muteTimeout) clearTimeout(muteTimeout);
+      });
+      encoderVolumeFallbacksRef.current = createEmptyLayerTimers();
+      encoderMuteFallbacksRef.current = createEmptyLayerTimers();
       clearNfcPresence();
       void adapter.disconnect();
       hardwareAdapterRef.current = null;
