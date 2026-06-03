@@ -756,50 +756,10 @@ const App = () => {
         const uid = normalizeSerialUid(tagPresentMatch[2]);
 
         if (isNfcTagId(tagId)) {
-          const assignment = resolveNfcAssignment(nfcAssignmentsRef.current, tagId);
-          const layer = getLayer(assignment.layerId);
-          const option = getLayerOption(assignment.layerId, assignment.optionId);
-          const uidMatchesSavedAssignment = Boolean(assignment.uid && uid === assignment.uid);
           const currentLayerId = activeReaderLayersRef.current[tagId];
           setSelectedTagId(tagId);
 
-          if (uidMatchesSavedAssignment) {
-            const wasSameCard = rememberReaderCard(tagId, assignment.layerId, assignment.optionId, uid);
-            setReaderLedStatus(tagId, "ok");
-            markReaderHeartbeat(tagId, assignment.layerId);
-            if (!wasSameCard) {
-              handleInputRef.current({
-                layerId: assignment.layerId,
-                optionId: assignment.optionId,
-                source: "hardware",
-                tagId,
-                uid,
-              }, {
-                cycleIfSame: false,
-                sourceLabel: `${getReaderLabel(tagId)} saved UID`,
-              });
-            }
-            updateReaderStatus(tagId, {
-              state: "tag-assigned",
-              title: `${getReaderLabel(tagId)} card present`,
-              detail: `${layer?.name ?? assignment.layerId} / ${option?.name ?? assignment.optionId}${uid ? ` - UID ${uid}` : ""}. Audio gate open.`,
-              uid,
-              layerId: assignment.layerId,
-              optionId: assignment.optionId,
-              payload: `dpi://v1/layer/${assignment.layerId}/option/${assignment.optionId}`,
-              atLabel: nowLabel,
-            });
-            if (!wasSameCard) {
-              setLastInputLabel(`${getReaderLabel(tagId)} opened ${layer?.name ?? assignment.layerId}`);
-              setHardwareActivity({
-                kind: "read",
-                title: `${getReaderLabel(tagId)} card present`,
-                detail: `${layer?.name ?? assignment.layerId} audio gate open`,
-                tagId,
-                atLabel: nowLabel,
-              });
-            }
-          } else if (currentLayerId) {
+          if (currentLayerId) {
             markReaderHeartbeat(tagId, currentLayerId);
           } else {
             updateReaderStatus(tagId, {
@@ -831,48 +791,19 @@ const App = () => {
         const tagId = tagReadMatch[1].toLowerCase();
         const uid = normalizeSerialUid(tagReadMatch[2]);
         if (isNfcTagId(tagId)) {
-          const savedAssignment = uid
-            ? nfcAssignmentsRef.current.find((assignment) => assignment.uid === uid || assignment.tagId === tagId)
-            : nfcAssignmentsRef.current.find((assignment) => assignment.tagId === tagId);
-          const layer = savedAssignment ? getLayer(savedAssignment.layerId) : undefined;
-          const option = savedAssignment ? getLayerOption(savedAssignment.layerId, savedAssignment.optionId) : undefined;
-          const uidMatched = Boolean(uid && savedAssignment?.uid === uid);
-          const assignment = resolveNfcAssignment(nfcAssignmentsRef.current, tagId);
-          const uidMatchesSavedAssignment = Boolean(assignment.uid && uid === assignment.uid);
           const currentLayerId = activeReaderLayersRef.current[tagId];
 
-          if (uidMatchesSavedAssignment) {
-            const wasSameCard = rememberReaderCard(tagId, assignment.layerId, assignment.optionId, uid);
-            setReaderLedStatus(tagId, "ok");
-            markReaderHeartbeat(tagId, assignment.layerId);
-            if (!wasSameCard) {
-              handleInputRef.current({
-                layerId: assignment.layerId,
-                optionId: assignment.optionId,
-                source: "hardware",
-                tagId,
-                uid,
-              }, {
-                cycleIfSame: false,
-                sourceLabel: `${getReaderLabel(tagId)} saved UID`,
-              });
-            }
-          } else if (currentLayerId) {
+          if (currentLayerId) {
             markReaderHeartbeat(tagId, currentLayerId);
           }
 
           updateReaderStatus(tagId, {
-            state: uidMatched ? "tag-assigned" : "tag-unassigned",
-            title: uidMatched
-              ? `${getReaderLabel(tagId)} UID assigned`
-              : `${getReaderLabel(tagId)} checking tag`,
-            detail: uidMatched && layer && option
-              ? `${layer.name} / ${option.name} - UID ${uid}`
-              : uid ? `UID ${uid} - checking DPI payload before opening audio.` : "Raw NFC tag detected without a DPI payload.",
+            state: currentLayerId ? "tag-assigned" : "tag-unassigned",
+            title: `${getReaderLabel(tagId)} checking tag`,
+            detail: uid
+              ? `UID ${uid} - waiting for DPI payload.`
+              : "Raw NFC tag detected without a DPI payload.",
             uid,
-            layerId: uidMatched ? savedAssignment?.layerId : undefined,
-            optionId: uidMatched ? savedAssignment?.optionId : undefined,
-            payload: uidMatched ? `dpi://v1/layer/${savedAssignment!.layerId}/option/${savedAssignment!.optionId}` : undefined,
             atLabel: nowLabel,
           });
         }
