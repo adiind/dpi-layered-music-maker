@@ -63,7 +63,7 @@ interface InputEventOptions {
 
 type ReaderLedState = "off" | "ok" | "bad";
 
-const NFC_BROWSER_PRESENCE_TIMEOUT_MS = 3400;
+const NFC_BROWSER_PRESENCE_TIMEOUT_MS = 1800;
 const ENCODER_VOLUME_STEP = 0.04;
 const ENCODER_FALLBACK_DELAY_MS = 80;
 

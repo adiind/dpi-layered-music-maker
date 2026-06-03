@@ -29,11 +29,11 @@
 //   TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 
 constexpr uint32_t SERIAL_BAUD = 115200;
-constexpr uint16_t NFC_READ_TIMEOUT_MS = 120;
+constexpr uint16_t NFC_READ_TIMEOUT_MS = 55;
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
-constexpr uint32_t NFC_REPEAT_WINDOW_MS = 1200;
-constexpr uint32_t NFC_REMOVED_WINDOW_MS = 2600;
-constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;
+constexpr uint32_t NFC_REPEAT_WINDOW_MS = 650;
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1100;
+constexpr uint8_t NFC_REMOVED_MISS_COUNT = 3;
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -41,6 +41,7 @@ constexpr uint16_t NDEF_READ_LIMIT = 160;
 constexpr size_t DPI_PAYLOAD_LIMIT = 96;
 constexpr uint32_t BUTTON_DEBOUNCE_MS = 45;
 constexpr uint8_t ENCODER_VOLUME_STEP_PERCENT = 4;
+constexpr uint8_t PN532_PASSIVE_ACTIVATION_RETRIES = 0x03;
 
 const char DPI_PAYLOAD_PREFIX[] = "dpi://v1/layer/";
 const char DPI_PAYLOAD_OPTION_MARKER[] = "/option/";
@@ -1136,7 +1137,7 @@ static bool startNfcReader(NfcReaderState &readerState) {
   Serial.println((versionData >> 8) & 0xFF, DEC);
 
   readerState.reader->SAMConfig();
-  readerState.reader->setPassiveActivationRetries(0x08);
+  readerState.reader->setPassiveActivationRetries(PN532_PASSIVE_ACTIVATION_RETRIES);
   readerState.tagPresent = false;
   readerState.lastSeenMs = 0;
   readerState.lastPresenceEmitMs = 0;
@@ -1196,7 +1197,6 @@ static void readNfcReader(NfcReaderState &readerState) {
   const String uidText = uidToHex(uid, uidLength);
   const bool wasPresent = readerState.tagPresent;
   const String previousUid = readerState.lastUid;
-  const uint32_t previousSeenMs = readerState.lastSeenMs;
   const bool uidChanged = uidText != previousUid;
 
   readerState.tagPresent = true;
@@ -1210,9 +1210,11 @@ static void readNfcReader(NfcReaderState &readerState) {
     printTagPresent(readerState, uidText);
   }
 
-  if (!uidChanged && now - previousSeenMs < NFC_REPEAT_WINDOW_MS) {
+  if (!uidChanged && wasPresent && now - readerState.lastPresenceEmitMs < NFC_REPEAT_WINDOW_MS) {
     return;
   }
+
+  readerState.lastPresenceEmitMs = now;
 
   Serial.print("TAG:");
   Serial.print(readerState.tagId);
