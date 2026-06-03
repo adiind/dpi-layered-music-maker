@@ -13,6 +13,8 @@
 // App-readable serial events:
 //   LAYER:<layerId>:<optionId>
 //   TAG:<tagId>:<uid>
+//   TAG_PRESENT:<tagId>:<uid>
+//   TAG_REMOVED:<tagId>
 //   BUTTON:<layerId>:PRESS
 //   ENC:<layerId>:+1|-1
 //   VOLUME:<layerId>:<0-100>
@@ -28,6 +30,7 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint16_t NFC_READ_TIMEOUT_MS = 120;
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
 constexpr uint32_t NFC_REPEAT_WINDOW_MS = 1200;
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1600;
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -105,17 +108,19 @@ struct NfcReaderState {
   uint8_t csPin;
   Adafruit_PN532 *reader;
   bool ready;
+  bool tagPresent;
   uint32_t lastRetryMs;
   uint32_t lastSeenMs;
+  uint32_t lastPresenceEmitMs;
   String lastUid;
 };
 
 NfcReaderState nfcReaders[] = {
-    {"tag-1", "foundation", "Foundation reader", PN532_CS_FOUNDATION, &nfcFoundation, false, 0, 0, ""},
-    {"tag-2", "texture", "Texture reader", PN532_CS_TEXTURE, &nfcTexture, false, 0, 0, ""},
-    {"tag-3", "drums", "Drums reader", PN532_CS_DRUMS, &nfcDrums, false, 0, 0, ""},
-    {"tag-4", "keys", "Keys reader", PN532_CS_KEYS, &nfcKeys, false, 0, 0, ""},
-    {"tag-5", "solo", "Solo reader", PN532_CS_SOLO, &nfcSolo, false, 0, 0, ""},
+    {"tag-1", "foundation", "Foundation reader", PN532_CS_FOUNDATION, &nfcFoundation, false, false, 0, 0, 0, ""},
+    {"tag-2", "texture", "Texture reader", PN532_CS_TEXTURE, &nfcTexture, false, false, 0, 0, 0, ""},
+    {"tag-3", "drums", "Drums reader", PN532_CS_DRUMS, &nfcDrums, false, false, 0, 0, 0, ""},
+    {"tag-4", "keys", "Keys reader", PN532_CS_KEYS, &nfcKeys, false, false, 0, 0, 0, ""},
+    {"tag-5", "solo", "Solo reader", PN532_CS_SOLO, &nfcSolo, false, false, 0, 0, 0, ""},
 };
 
 constexpr size_t LAYER_COUNT = sizeof(LAYERS) / sizeof(LAYERS[0]);
@@ -126,6 +131,7 @@ String serialCommand;
 String lastNtagReadError;
 uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
 bool layerMuted[LAYER_COUNT] = {false, false, false, false, false};
+bool layerTagPresent[LAYER_COUNT] = {false, false, false, false, false};
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -173,7 +179,7 @@ static uint8_t scaleColor(uint8_t value, uint8_t volumePercent) {
 static void renderNeoPixels() {
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
-    const uint8_t volume = layerMuted[layerIndex] ? 0 : layerVolumes[layerIndex];
+    const uint8_t volume = layerMuted[layerIndex] || !layerTagPresent[layerIndex] ? 0 : layerVolumes[layerIndex];
     const uint8_t red = scaleColor(layer.red, volume);
     const uint8_t green = scaleColor(layer.green, volume);
     const uint8_t blue = scaleColor(layer.blue, volume);
@@ -187,6 +193,14 @@ static void renderNeoPixels() {
   }
 
   layerPixels.show();
+}
+
+static void setReaderLayerPresence(const NfcReaderState &readerState, bool present) {
+  const int8_t layerIndex = findLayerIndex(readerState.layerId);
+  if (layerIndex < 0) return;
+
+  layerTagPresent[layerIndex] = present;
+  renderNeoPixels();
 }
 
 static bool setLayerVolume(const char *layerId, int percent) {
@@ -270,6 +284,18 @@ static void printTagUnsupported(const NfcReaderState &readerState, const String 
   Serial.print(uidText);
   Serial.print(":uid-length-");
   Serial.println(uidLength);
+}
+
+static void printTagPresent(const NfcReaderState &readerState, const String &uidText) {
+  Serial.print("TAG_PRESENT:");
+  Serial.print(readerState.tagId);
+  Serial.print(":");
+  Serial.println(uidText);
+}
+
+static void printTagRemoved(const NfcReaderState &readerState) {
+  Serial.print("TAG_REMOVED:");
+  Serial.println(readerState.tagId);
 }
 
 static void printLayerVolume(const char *layerId, uint8_t volumePercent) {
@@ -970,6 +996,11 @@ static bool startNfcReader(NfcReaderState &readerState) {
 
   readerState.reader->SAMConfig();
   readerState.reader->setPassiveActivationRetries(0x08);
+  readerState.tagPresent = false;
+  readerState.lastSeenMs = 0;
+  readerState.lastPresenceEmitMs = 0;
+  readerState.lastUid = "";
+  setReaderLayerPresence(readerState, false);
   return true;
 }
 
@@ -999,17 +1030,38 @@ static void readNfcReader(NfcReaderState &readerState) {
       &uidLength,
       NFC_READ_TIMEOUT_MS);
 
-  if (!found) return;
-
-  const String uidText = uidToHex(uid, uidLength);
   const uint32_t now = millis();
+  if (!found) {
+    if (readerState.tagPresent && now - readerState.lastSeenMs >= NFC_REMOVED_WINDOW_MS) {
+      readerState.tagPresent = false;
+      readerState.lastUid = "";
+      readerState.lastPresenceEmitMs = now;
+      setReaderLayerPresence(readerState, false);
+      printTagRemoved(readerState);
+    }
 
-  if (uidText == readerState.lastUid && now - readerState.lastSeenMs < NFC_REPEAT_WINDOW_MS) {
     return;
   }
 
+  const String uidText = uidToHex(uid, uidLength);
+  const bool wasPresent = readerState.tagPresent;
+  const String previousUid = readerState.lastUid;
+  const uint32_t previousSeenMs = readerState.lastSeenMs;
+  const bool uidChanged = uidText != previousUid;
+
+  readerState.tagPresent = true;
   readerState.lastUid = uidText;
   readerState.lastSeenMs = now;
+  setReaderLayerPresence(readerState, true);
+
+  if (!wasPresent || uidChanged) {
+    readerState.lastPresenceEmitMs = now;
+    printTagPresent(readerState, uidText);
+  }
+
+  if (!uidChanged && now - previousSeenMs < NFC_REPEAT_WINDOW_MS) {
+    return;
+  }
 
   Serial.print("TAG:");
   Serial.print(readerState.tagId);
@@ -1047,7 +1099,7 @@ void setup() {
   Serial.println();
   Serial.println("DPI ESP32 layer controller");
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
-  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG:<tagId>:<uid>, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>");
+  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>");
 
   layerPixels.begin();
   layerPixels.clear();

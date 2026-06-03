@@ -47,6 +47,10 @@ export class StemMusicEngine {
   private selections: SelectionState = { ...DEFAULT_SELECTIONS };
   private volumes: VolumeState = { ...DEFAULT_VOLUMES };
   private mutes: MuteState = { ...DEFAULT_MUTES };
+  private layerPresence: Record<LayerId, boolean> = LAYER_ORDER.reduce(
+    (presence, layerId) => ({ ...presence, [layerId]: false }),
+    {} as Record<LayerId, boolean>,
+  );
   private startedAt = 0;
   private animationFrame: number | null = null;
   private loadedKeys = new Set<string>();
@@ -176,24 +180,24 @@ export class StemMusicEngine {
   }
 
   setVolume(layerId: LayerId, volume: number) {
+    const wasAudible = this.isLayerAudible(layerId);
     this.volumes = { ...this.volumes, [layerId]: volume };
     this.updateLayerLevel(layerId);
+    this.syncLayerPlayerForAudibleChange(layerId, wasAudible);
   }
 
   setMuted(layerId: LayerId, muted: boolean) {
+    const wasAudible = this.isLayerAudible(layerId);
     this.mutes = { ...this.mutes, [layerId]: muted };
     this.updateLayerLevel(layerId);
+    this.syncLayerPlayerForAudibleChange(layerId, wasAudible);
+  }
 
-    if (!this.running) return;
-
-    const player = this.players?.[layerId][this.selections[layerId]];
-    const now = Tone.now();
-    if (muted) {
-      player?.stop(now + SWITCH_FADE_SECONDS);
-      return;
-    }
-
-    player?.start(now, this.currentOffset());
+  setLayerPresence(layerId: LayerId, present: boolean) {
+    const wasAudible = this.isLayerAudible(layerId);
+    this.layerPresence = { ...this.layerPresence, [layerId]: present };
+    this.updateLayerLevel(layerId);
+    this.syncLayerPlayerForAudibleChange(layerId, wasAudible);
   }
 
   private ensureInitialized() {
@@ -288,13 +292,13 @@ export class StemMusicEngine {
     if (!this.players) return;
 
     for (const layerId of LAYER_ORDER) {
-      if (this.mutes[layerId]) continue;
+      if (!this.isLayerAudible(layerId)) continue;
       this.players[layerId][this.selections[layerId]]?.start(time, offset);
     }
   }
 
   private switchLayerPlayer(layerId: LayerId, previousOptionId: string, nextOptionId: string) {
-    if (!this.players || this.mutes[layerId]) return;
+    if (!this.players || !this.isLayerAudible(layerId)) return;
 
     const now = Tone.now();
     const offset = this.currentOffset(now);
@@ -333,7 +337,28 @@ export class StemMusicEngine {
   }
 
   private getLayerLevel(layerId: LayerId) {
-    return this.mutes[layerId] ? 0 : this.volumes[layerId] * getLayerOptionGain(layerId, this.selections[layerId]);
+    return this.isLayerAudible(layerId) ? this.volumes[layerId] * getLayerOptionGain(layerId, this.selections[layerId]) : 0;
+  }
+
+  private isLayerAudible(layerId: LayerId) {
+    return this.layerPresence[layerId] && !this.mutes[layerId] && this.volumes[layerId] > 0;
+  }
+
+  private syncLayerPlayerForAudibleChange(layerId: LayerId, wasAudible: boolean) {
+    if (!this.running || !this.players) return;
+
+    const isAudible = this.isLayerAudible(layerId);
+    if (wasAudible === isAudible) return;
+
+    const player = this.players[layerId][this.selections[layerId]];
+    const now = Tone.now();
+
+    if (isAudible) {
+      player?.start(now, this.currentOffset(now));
+      return;
+    }
+
+    player?.stop(now + SWITCH_FADE_SECONDS);
   }
 
   private rampMasterLevel(level: number, rampSeconds: number) {
@@ -365,7 +390,7 @@ export class StemMusicEngine {
 
   private createTick(offset: number): EngineTick {
     const progress = clamp01(offset / DEMO_DURATION_SECONDS);
-    const activeLayers = LAYER_ORDER.filter((layerId) => !this.mutes[layerId] && this.getLayerLevel(layerId) > 0);
+    const activeLayers = LAYER_ORDER.filter((layerId) => this.isLayerAudible(layerId) && this.getLayerLevel(layerId) > 0);
 
     return {
       progress,
@@ -378,7 +403,7 @@ export class StemMusicEngine {
 
   private createLayerLevels(progress: number) {
     return LAYER_ORDER.reduce((levels, layerId, index) => {
-      if (this.mutes[layerId]) {
+      if (!this.isLayerAudible(layerId)) {
         levels[layerId] = 0;
         return levels;
       }

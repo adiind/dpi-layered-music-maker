@@ -8,6 +8,7 @@ interface LayerColumnProps {
   muted: boolean;
   volume: number;
   active: boolean;
+  nfcPresent: boolean;
   recent: boolean;
   level: number;
   onSelect: (layerId: LayerId, optionId: string) => void;
@@ -67,6 +68,7 @@ export const LayerColumn = ({
   muted,
   volume,
   active,
+  nfcPresent,
   recent,
   level,
   onSelect,
@@ -75,6 +77,7 @@ export const LayerColumn = ({
 }: LayerColumnProps) => {
   const currentOption = layer.options.find((option) => option.id === selectedOptionId);
   const ringValue = muted ? 0 : Math.max(0.03, volume);
+  const statusLabel = muted ? "Muted" : active ? "Active" : nfcPresent ? "Ready" : "Needs NFC";
 
   return (
     <section
@@ -115,8 +118,8 @@ export const LayerColumn = ({
             <h2>{layer.name}</h2>
             <p>{currentOption?.name}</p>
           </div>
-          <span className={classNames("active-pill", active && !muted && "on")}>
-            {active && !muted ? "Active" : "Idle"}
+          <span className={classNames("active-pill", active && !muted && "on", !muted && !nfcPresent && "waiting")}>
+            {statusLabel}
           </span>
         </div>
 

@@ -410,6 +410,11 @@ input:focus-visible {
   color: #128237;
 }
 
+.active-pill.waiting {
+  background: #fff7db;
+  color: #9a5b00;
+}
+
 .mini-wave {
   display: flex;
   height: 18px;

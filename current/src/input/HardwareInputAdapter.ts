@@ -233,15 +233,20 @@ export const mapNfcUidToLayerInputEvent = (uid: string): LayerInputEvent => {
   };
 };
 
-export const mapKnownTagToLayerInputEvent = (tagId: NfcTagId, uid?: string): LayerInputEvent => {
+export const mapKnownTagToLayerInputEvent = (tagId: NfcTagId, uid?: string): LayerInputEvent | undefined => {
   const assignment = resolveNfcAssignment(loadNfcAssignments(), tagId);
+  const normalizedUid = normalizeUid(uid);
+
+  if (assignment.uid && assignment.uid !== normalizedUid) {
+    return undefined;
+  }
 
   return {
     layerId: assignment.layerId,
     optionId: assignment.optionId,
     source: "hardware",
     tagId,
-    uid,
+    uid: normalizedUid,
   };
 };
 
@@ -527,7 +532,10 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
 
     const tagRead = parseKnownTagLine(line);
     if (tagRead) {
-      this.emit(mapKnownTagToLayerInputEvent(tagRead.tagId, tagRead.uid));
+      const event = mapKnownTagToLayerInputEvent(tagRead.tagId, tagRead.uid);
+      if (event) {
+        this.emit(event);
+      }
       return;
     }
 

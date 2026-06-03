@@ -61,6 +61,9 @@ const formatNow = () =>
     second: "2-digit",
   });
 
+const normalizeSerialUid = (value?: string) =>
+  value?.match(/[0-9a-fA-F]{2}/g)?.map((byte) => byte.toUpperCase()).join(":");
+
 const getReaderNumber = (tagId: NfcTagId) => Number(tagId.replace("tag-", ""));
 const getReaderLabel = (tagId: NfcTagId) => `Reader ${getReaderNumber(tagId)}`;
 
@@ -72,6 +75,12 @@ const isLayerId = (value: string): value is LayerId =>
 
 const createEmptyLayerLevels = () =>
   LAYER_ORDER.reduce((levels, layerId) => ({ ...levels, [layerId]: 0 }), {} as LayerLevelState);
+
+const createEmptyNfcPresence = () =>
+  LAYER_ORDER.reduce((presence, layerId) => ({ ...presence, [layerId]: false }), {} as Record<LayerId, boolean>);
+
+const createEmptyReaderLayerMap = () =>
+  NFC_TAG_IDS.reduce((presence, tagId) => ({ ...presence, [tagId]: null }), {} as Record<NfcTagId, LayerId | null>);
 
 const createInitialReaderStatuses = (): Record<NfcTagId, NfcReaderStatus> =>
   NFC_TAG_IDS.reduce(
@@ -135,6 +144,8 @@ const App = () => {
   const nfcAssignmentsRef = useRef<NfcTagAssignment[]>([]);
   const volumesRef = useRef<VolumeState>({ ...DEFAULT_VOLUMES });
   const mutesRef = useRef<MuteState>({ ...DEFAULT_MUTES });
+  const nfcPresenceRef = useRef<Record<LayerId, boolean>>(createEmptyNfcPresence());
+  const activeReaderLayersRef = useRef<Record<NfcTagId, LayerId | null>>(createEmptyReaderLayerMap());
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -144,6 +155,7 @@ const App = () => {
   const [selections, setSelections] = useState<SelectionState>({ ...DEFAULT_SELECTIONS });
   const [volumes, setVolumes] = useState<VolumeState>({ ...DEFAULT_VOLUMES });
   const [mutes, setMutes] = useState<MuteState>({ ...DEFAULT_MUTES });
+  const [nfcPresence, setNfcPresence] = useState<Record<LayerId, boolean>>(() => createEmptyNfcPresence());
   const [tick, setTick] = useState<EngineTick>(INITIAL_TICK);
   const [lastInputLabel, setLastInputLabel] = useState("No input yet");
   const [changeNotice, setChangeNotice] = useState<ChangeNotice | null>(null);
@@ -183,6 +195,35 @@ const App = () => {
     });
   }, [sendLayerVolumeToHardware]);
 
+  const syncNfcPresenceFromReaders = useCallback(() => {
+    const nextPresence = createEmptyNfcPresence();
+
+    Object.values(activeReaderLayersRef.current).forEach((layerId) => {
+      if (layerId) {
+        nextPresence[layerId] = true;
+      }
+    });
+
+    nfcPresenceRef.current = nextPresence;
+    setNfcPresence(nextPresence);
+    LAYER_ORDER.forEach((layerId) => {
+      engineRef.current?.setLayerPresence(layerId, nextPresence[layerId]);
+    });
+  }, []);
+
+  const clearNfcPresence = useCallback(() => {
+    activeReaderLayersRef.current = createEmptyReaderLayerMap();
+    syncNfcPresenceFromReaders();
+  }, [syncNfcPresenceFromReaders]);
+
+  const setReaderLayerPresence = useCallback((tagId: NfcTagId, layerId: LayerId | null) => {
+    activeReaderLayersRef.current = {
+      ...activeReaderLayersRef.current,
+      [tagId]: layerId,
+    };
+    syncNfcPresenceFromReaders();
+  }, [syncNfcPresenceFromReaders]);
+
   useEffect(() => {
     const engine = new StemMusicEngine();
     engine.setTickListener(setTick);
@@ -192,6 +233,9 @@ const App = () => {
       setSelections(nextSelections);
     });
     engineRef.current = engine;
+    LAYER_ORDER.forEach((layerId) => {
+      engine.setLayerPresence(layerId, nfcPresenceRef.current[layerId]);
+    });
     void engine.prepare();
 
     return () => {
@@ -311,6 +355,7 @@ const App = () => {
       if (status.state === "connected") {
         pendingReaderTagRef.current = null;
         setReaderStatuses(createInitialReaderStatuses());
+        clearNfcPresence();
         setLastInputLabel(`ESP32 connected: ${status.portName ?? "serial port"}`);
         setHardwareActivity({
           kind: "connect",
@@ -321,7 +366,12 @@ const App = () => {
         syncHardwareVolumes();
       }
 
+      if (status.state === "disconnected" || status.state === "disconnecting") {
+        clearNfcPresence();
+      }
+
       if (status.state === "unsupported" || status.state === "error") {
+        clearNfcPresence();
         setLastInputLabel(status.message ?? "ESP32 serial input is not available.");
         setHardwareActivity({
           kind: "connect",
@@ -337,6 +387,8 @@ const App = () => {
       const nowLabel = formatNow();
       const readerStartMatch = line.match(/^PN532\s+(tag-[1-5])\s+(.+?):\s+trying/i);
       const tagReadMatch = line.match(/^TAG:\s*(tag-[1-5])\s*:?\s*([0-9a-fA-F:\-\s]*)/i);
+      const tagPresentMatch = line.match(/^TAG_PRESENT:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*$/i);
+      const tagRemovedMatch = line.match(/^TAG_REMOVED:\s*(tag-[1-5])\s*$/i);
       const volumeMatch = line.match(/^VOLUME:\s*([a-z0-9-]+)\s*:\s*(\d{1,3})\s*$/i);
       const muteMatch = line.match(/^MUTE:\s*([a-z0-9-]+)\s*:\s*([01])\s*$/i);
 
@@ -413,9 +465,81 @@ const App = () => {
           tagId: tagId ?? undefined,
           atLabel: nowLabel,
         });
+      } else if (tagPresentMatch) {
+        const tagId = tagPresentMatch[1].toLowerCase();
+        const uid = normalizeSerialUid(tagPresentMatch[2]);
+
+        if (isNfcTagId(tagId)) {
+          const assignment = resolveNfcAssignment(nfcAssignmentsRef.current, tagId);
+          const layer = getLayer(assignment.layerId);
+          const option = getLayerOption(assignment.layerId, assignment.optionId);
+          const uidAllowed = !assignment.uid || !uid || assignment.uid === uid;
+          setSelectedTagId(tagId);
+
+          if (uidAllowed) {
+            setReaderLayerPresence(tagId, assignment.layerId);
+            updateReaderStatus(tagId, {
+              state: "tag-assigned",
+              title: `${getReaderLabel(tagId)} card present`,
+              detail: `${layer?.name ?? assignment.layerId} / ${option?.name ?? assignment.optionId}${uid ? ` - UID ${uid}` : ""}. Audio gate open.`,
+              uid,
+              layerId: assignment.layerId,
+              optionId: assignment.optionId,
+              payload: `dpi://v1/layer/${assignment.layerId}/option/${assignment.optionId}`,
+              atLabel: nowLabel,
+            });
+            setLastInputLabel(`${getReaderLabel(tagId)} opened ${layer?.name ?? assignment.layerId}`);
+            setHardwareActivity({
+              kind: "read",
+              title: `${getReaderLabel(tagId)} card present`,
+              detail: `${layer?.name ?? assignment.layerId} audio gate open`,
+              tagId,
+              atLabel: nowLabel,
+            });
+          } else {
+            setReaderLayerPresence(tagId, null);
+            updateReaderStatus(tagId, {
+              state: "tag-unassigned",
+              title: `${getReaderLabel(tagId)} wrong card`,
+              detail: `UID ${uid ?? "unknown"} does not match saved UID ${assignment.uid}. Audio gate closed.`,
+              uid,
+              atLabel: nowLabel,
+            });
+            setLastInputLabel(`${getReaderLabel(tagId)} rejected UID ${uid ?? "unknown"}`);
+            setHardwareActivity({
+              kind: "read",
+              title: "Card UID mismatch",
+              detail: `${getReaderLabel(tagId)} is waiting for ${assignment.uid}.`,
+              tagId,
+              atLabel: nowLabel,
+            });
+          }
+        }
+      } else if (tagRemovedMatch) {
+        const tagId = tagRemovedMatch[1].toLowerCase();
+
+        if (isNfcTagId(tagId)) {
+          const previousLayerId = activeReaderLayersRef.current[tagId];
+          const previousLayer = previousLayerId ? getLayer(previousLayerId) : undefined;
+          setReaderLayerPresence(tagId, null);
+          updateReaderStatus(tagId, {
+            state: "detected",
+            title: `${getReaderLabel(tagId)} card removed`,
+            detail: previousLayer ? `${previousLayer.name} audio gate closed.` : "No active card on this reader.",
+            atLabel: nowLabel,
+          });
+          setLastInputLabel(`${getReaderLabel(tagId)} card removed`);
+          setHardwareActivity({
+            kind: "read",
+            title: `${getReaderLabel(tagId)} card removed`,
+            detail: previousLayer ? `${previousLayer.name} stopped` : "Layer gate closed.",
+            tagId,
+            atLabel: nowLabel,
+          });
+        }
       } else if (tagReadMatch) {
         const tagId = tagReadMatch[1].toLowerCase();
-        const uid = tagReadMatch[2]?.match(/[0-9a-fA-F]{2}/g)?.map((byte) => byte.toUpperCase()).join(":");
+        const uid = normalizeSerialUid(tagReadMatch[2]);
         if (isNfcTagId(tagId)) {
           const savedAssignment = uid
             ? nfcAssignmentsRef.current.find((assignment) => assignment.uid === uid || assignment.tagId === tagId)
@@ -548,6 +672,9 @@ const App = () => {
 
       if (event.kind === "read-card") {
         setSelectedTagId(event.tagId);
+        if (event.layerId) {
+          setReaderLayerPresence(event.tagId, event.layerId);
+        }
         updateReaderStatus(event.tagId, {
           state: "tag-assigned",
           title: `${readerLabel} DPI card`,
@@ -612,7 +739,7 @@ const App = () => {
       void adapter.disconnect();
       hardwareAdapterRef.current = null;
     };
-  }, [syncHardwareVolumes]);
+  }, [clearNfcPresence, setReaderLayerPresence, syncHardwareVolumes]);
 
   useEffect(() => {
     const adapter = new KeyboardNfcMockAdapter(resolveNextOption);
@@ -629,10 +756,11 @@ const App = () => {
       setHardwareActivity({
         kind: "test",
         title: `Tested ${getReaderLabel(tagId)}`,
-        detail: `${layer?.name ?? assignment.layerId} / ${option?.name ?? assignment.optionId}`,
+        detail: `${layer?.name ?? assignment.layerId} / ${option?.name ?? assignment.optionId}. Audio gate open.`,
         tagId,
         atLabel: formatNow(),
       });
+      setReaderLayerPresence(tagId, assignment.layerId);
 
       handleInputEvent({
         layerId: assignment.layerId,
@@ -644,7 +772,7 @@ const App = () => {
         sourceLabel: getReaderLabel(tagId),
       });
     },
-    [handleInputEvent, nfcAssignments],
+    [handleInputEvent, nfcAssignments, setReaderLayerPresence],
   );
 
   const handleAssignNfcTag = useCallback((tagId: NfcTagId, layerId: LayerId, optionId: string) => {
@@ -652,6 +780,9 @@ const App = () => {
     const option = getLayerOption(layerId, optionId);
 
     setNfcAssignments((current) => updateNfcAssignment(current, tagId, layerId, optionId));
+    if (activeReaderLayersRef.current[tagId]) {
+      setReaderLayerPresence(tagId, layerId);
+    }
     setHardwareActivity({
       kind: "assign",
       title: `Assigned ${getReaderLabel(tagId)}`,
@@ -659,7 +790,7 @@ const App = () => {
       tagId,
       atLabel: formatNow(),
     });
-  }, []);
+  }, [setReaderLayerPresence]);
 
   const handleWriteNfcTag = useCallback(async (tagId: NfcTagId) => {
     const adapter = hardwareAdapterRef.current;
@@ -727,6 +858,7 @@ const App = () => {
   const handleResetNfcTags = useCallback(() => {
     setNfcAssignments(resetNfcAssignments());
     setSelectedTagId("tag-1");
+    clearNfcPresence();
     setHardwareActivity({
       kind: "assign",
       title: "Assignments reset",
@@ -734,7 +866,7 @@ const App = () => {
       tagId: "tag-1",
       atLabel: formatNow(),
     });
-  }, []);
+  }, [clearNfcPresence]);
 
   const handleToggleHardware = useCallback(async () => {
     const adapter = hardwareAdapterRef.current;
@@ -742,6 +874,7 @@ const App = () => {
 
     if (hardwareStatus.state === "connected" || hardwareStatus.state === "connecting" || hardwareStatus.state === "requesting") {
       await adapter.disconnect();
+      clearNfcPresence();
       setLastInputLabel("ESP32 disconnected");
       setHardwareActivity({
         kind: "connect",
@@ -762,7 +895,7 @@ const App = () => {
     if (status.message) {
       setLastInputLabel(status.message);
     }
-  }, [hardwareStatus.state]);
+  }, [clearNfcPresence, hardwareStatus.state]);
 
   const handleTogglePlayback = async () => {
     const engine = engineRef.current;
@@ -778,6 +911,12 @@ const App = () => {
     try {
       await engine.start();
       setIsPlaying(engine.isRunning);
+      const liveLayerCount = Object.values(nfcPresenceRef.current).filter(Boolean).length;
+      setLastInputLabel(
+        liveLayerCount > 0
+          ? `Playback armed with ${liveLayerCount} NFC layer${liveLayerCount === 1 ? "" : "s"} live.`
+          : "Playback armed: place NFC cards on readers to hear layers.",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Audio could not start.";
       setLastInputLabel(message);
@@ -819,6 +958,7 @@ const App = () => {
           muted={mutes[layer.id]}
           volume={volumes[layer.id]}
           active={tick.activeLayers.includes(layer.id)}
+          nfcPresent={nfcPresence[layer.id]}
           recent={recentLayerId === layer.id}
           level={tick.layerLevels[layer.id]}
           onSelect={handleSelect}
@@ -826,7 +966,7 @@ const App = () => {
           onVolume={handleVolume}
         />
       )),
-    [handleSelect, handleToggleMute, handleVolume, mutes, recentLayerId, selections, tick.activeLayers, tick.layerLevels, volumes],
+    [handleSelect, handleToggleMute, handleVolume, mutes, nfcPresence, recentLayerId, selections, tick.activeLayers, tick.layerLevels, volumes],
   );
 
   return (
