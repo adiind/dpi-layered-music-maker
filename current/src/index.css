@@ -40,7 +40,7 @@ button {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid #0a7bd8;
+  outline: 2px solid #1d4ed8;
   outline-offset: 2px;
 }
 
@@ -918,7 +918,7 @@ input:focus-visible {
 .studio-status-card.write-ready,
 .studio-status-card.write-writing,
 .studio-status-card.write-unverified {
-  border-color: #d9a000;
+  border-color: #facc15;
   background: #fffbeb;
 }
 
@@ -1063,12 +1063,12 @@ input:focus-visible {
 }
 
 .reader-health-card.reader-checking {
-  border-color: #d9a000;
+  border-color: #facc15;
   background: #fffbeb;
 }
 
 .reader-health-card.reader-checking::before {
-  border-top-color: #d9a000;
+  border-top-color: #facc15;
 }
 
 .reader-health-card.reader-detected {
@@ -1118,19 +1118,19 @@ input:focus-visible {
 }
 
 .reader-health-card.reader-tag-unassigned {
-  border-color: #d9a000;
+  border-color: #facc15;
   background: #fffbeb;
   box-shadow:
-    0 0 0 3px rgba(217, 160, 0, 0.13),
+    0 0 0 3px rgba(250, 204, 21, 0.13),
     0 8px 28px rgba(15, 23, 42, 0.05);
 }
 
 .reader-health-card.reader-tag-unassigned::before {
-  border-top-color: #d9a000;
+  border-top-color: #facc15;
 }
 
 .reader-health-card.reader-tag-unassigned > span {
-  background: #d9a000;
+  background: #facc15;
   color: #ffffff;
 }
 
@@ -1549,7 +1549,7 @@ input:focus-visible {
 .write-wizard.state-queued,
 .write-wizard.state-ready,
 .write-wizard.state-writing {
-  border-color: #d9a000;
+  border-color: #facc15;
   background: #fffaf0;
 }
 

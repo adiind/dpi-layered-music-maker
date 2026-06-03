@@ -82,11 +82,11 @@ struct LayerSpec {
 };
 
 const LayerSpec LAYERS[] = {
-    {"foundation", "Foundation", {"bass-guitar", "bass-guitar-b", "bouncy-synth-chords"}, 255, 210, 0},
-    {"texture", "Texture", {"synth-wavey", "brushed-snare", "ethereal-echo-thing"}, 255, 116, 0},
-    {"drums", "Drums", {"drum-simple", "drum-poom-tss", "drum-w-duck"}, 255, 35, 30},
-    {"keys", "Keys", {"piano-1", "piano-2", "piano-3"}, 0, 190, 80},
-    {"solo", "Solo", {"guitar-notes", "distort-guitar", "piano-solo"}, 0, 120, 255},
+    {"foundation", "Foundation", {"bass-guitar", "bass-guitar-b", "bouncy-synth-chords"}, 56, 189, 248},
+    {"texture", "Texture", {"synth-wavey", "brushed-snare", "ethereal-echo-thing"}, 239, 68, 68},
+    {"drums", "Drums", {"drum-simple", "drum-poom-tss", "drum-w-duck"}, 250, 204, 21},
+    {"keys", "Keys", {"piano-1", "piano-2", "piano-3"}, 29, 78, 216},
+    {"solo", "Solo", {"guitar-notes", "distort-guitar", "piano-solo"}, 249, 115, 22},
 };
 
 struct EncoderState {
