@@ -14,6 +14,9 @@
 //   LAYER:<layerId>:<optionId>
 //   TAG:<tagId>:<uid>
 //   BUTTON:<layerId>:PRESS
+//   ENC:<layerId>:+1|-1
+//   VOLUME:<layerId>:<0-100>
+//   MUTE:<layerId>:0|1
 //   WRITE_READY:<tagId>:<payload>
 //   WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
 //   WRITE_UNVERIFIED:<tagId>:<uid>:<layerId>:<optionId>:<reason>
@@ -31,6 +34,7 @@ constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
 constexpr uint16_t NDEF_READ_LIMIT = 160;
 constexpr size_t DPI_PAYLOAD_LIMIT = 96;
 constexpr uint32_t BUTTON_DEBOUNCE_MS = 45;
+constexpr uint8_t ENCODER_VOLUME_STEP_PERCENT = 4;
 
 const char DPI_PAYLOAD_PREFIX[] = "dpi://v1/layer/";
 const char DPI_PAYLOAD_OPTION_MARKER[] = "/option/";
@@ -80,7 +84,6 @@ struct EncoderState {
   uint8_t clkPin;
   uint8_t dtPin;
   uint8_t swPin;
-  uint8_t optionIndex;
   uint8_t lastState;
   int8_t accumulator;
   bool lastButtonPressed;
@@ -88,11 +91,11 @@ struct EncoderState {
 };
 
 EncoderState encoders[] = {
-    {"foundation", "Foundation", 32, 33, 25, 0, 0, 0, false, 0},
-    {"texture", "Texture", 26, 27, 14, 0, 0, 0, false, 0},
-    {"drums", "Drums", 16, 17, 13, 0, 0, 0, false, 0},
-    {"keys", "Keys", 34, 35, 21, 0, 0, 0, false, 0},
-    {"solo", "Solo", 36, 39, 22, 0, 0, 0, false, 0},
+    {"foundation", "Foundation", 32, 33, 25, 0, 0, false, 0},
+    {"texture", "Texture", 26, 27, 14, 0, 0, false, 0},
+    {"drums", "Drums", 16, 17, 13, 0, 0, false, 0},
+    {"keys", "Keys", 34, 35, 21, 0, 0, false, 0},
+    {"solo", "Solo", 36, 39, 22, 0, 0, false, 0},
 };
 
 struct NfcReaderState {
@@ -122,6 +125,7 @@ constexpr size_t NFC_READER_COUNT = sizeof(nfcReaders) / sizeof(nfcReaders[0]);
 String serialCommand;
 String lastNtagReadError;
 uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
+bool layerMuted[LAYER_COUNT] = {false, false, false, false, false};
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -169,7 +173,7 @@ static uint8_t scaleColor(uint8_t value, uint8_t volumePercent) {
 static void renderNeoPixels() {
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
-    const uint8_t volume = layerVolumes[layerIndex];
+    const uint8_t volume = layerMuted[layerIndex] ? 0 : layerVolumes[layerIndex];
     const uint8_t red = scaleColor(layer.red, volume);
     const uint8_t green = scaleColor(layer.green, volume);
     const uint8_t blue = scaleColor(layer.blue, volume);
@@ -192,6 +196,9 @@ static bool setLayerVolume(const char *layerId, int percent) {
   }
 
   layerVolumes[layerIndex] = constrain(percent, 0, 100);
+  if (percent > 0) {
+    layerMuted[layerIndex] = false;
+  }
   renderNeoPixels();
   return true;
 }
@@ -265,30 +272,47 @@ static void printTagUnsupported(const NfcReaderState &readerState, const String 
   Serial.println(uidLength);
 }
 
-static void printLayerSelection(const EncoderState &encoder) {
-  const LayerSpec *layer = findLayer(encoder.layerId);
-  if (!layer) return;
-
-  Serial.print("LAYER:");
-  Serial.print(layer->id);
+static void printLayerVolume(const char *layerId, uint8_t volumePercent) {
+  Serial.print("VOLUME:");
+  Serial.print(layerId);
   Serial.print(":");
-  Serial.println(layer->options[encoder.optionIndex]);
+  Serial.println(volumePercent);
 }
 
-static void moveLayerOption(EncoderState &encoder, int8_t direction) {
-  if (direction > 0) {
-    encoder.optionIndex = (encoder.optionIndex + 1) % 3;
-    Serial.print("ENC:");
-    Serial.print(encoder.layerId);
-    Serial.println(":+1");
-  } else {
-    encoder.optionIndex = (encoder.optionIndex + 2) % 3;
-    Serial.print("ENC:");
-    Serial.print(encoder.layerId);
-    Serial.println(":-1");
+static void printLayerMute(const char *layerId, bool muted) {
+  Serial.print("MUTE:");
+  Serial.print(layerId);
+  Serial.print(":");
+  Serial.println(muted ? 1 : 0);
+}
+
+static void adjustLayerVolumeFromEncoder(EncoderState &encoder, int8_t direction) {
+  const int8_t layerIndex = findLayerIndex(encoder.layerId);
+  if (layerIndex < 0) return;
+
+  const int nextVolume = (int)layerVolumes[layerIndex] + (direction * ENCODER_VOLUME_STEP_PERCENT);
+  layerVolumes[layerIndex] = constrain(nextVolume, 0, 100);
+  if (layerMuted[layerIndex]) {
+    layerMuted[layerIndex] = false;
+    printLayerMute(encoder.layerId, false);
   }
 
-  printLayerSelection(encoder);
+  renderNeoPixels();
+
+  Serial.print("ENC:");
+  Serial.print(encoder.layerId);
+  Serial.println(direction > 0 ? ":+1" : ":-1");
+  printLayerVolume(encoder.layerId, layerVolumes[layerIndex]);
+}
+
+static void toggleLayerMuteFromEncoder(EncoderState &encoder) {
+  const int8_t layerIndex = findLayerIndex(encoder.layerId);
+  if (layerIndex < 0) return;
+
+  layerMuted[layerIndex] = !layerMuted[layerIndex];
+  renderNeoPixels();
+  printLayerMute(encoder.layerId, layerMuted[layerIndex]);
+  printLayerVolume(encoder.layerId, layerMuted[layerIndex] ? 0 : layerVolumes[layerIndex]);
 }
 
 static void readEncoders() {
@@ -303,10 +327,10 @@ static void readEncoders() {
 
       if (encoder.accumulator >= 4) {
         encoder.accumulator = 0;
-        moveLayerOption(encoder, 1);
+        adjustLayerVolumeFromEncoder(encoder, 1);
       } else if (encoder.accumulator <= -4) {
         encoder.accumulator = 0;
-        moveLayerOption(encoder, -1);
+        adjustLayerVolumeFromEncoder(encoder, -1);
       }
     }
 
@@ -323,6 +347,7 @@ static void readEncoders() {
         Serial.print("BUTTON:");
         Serial.print(encoder.layerId);
         Serial.println(":PRESS");
+        toggleLayerMuteFromEncoder(encoder);
       }
     }
   }

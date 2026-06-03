@@ -67,6 +67,9 @@ const getReaderLabel = (tagId: NfcTagId) => `Reader ${getReaderNumber(tagId)}`;
 const isNfcTagId = (value: string): value is NfcTagId =>
   NFC_TAG_IDS.includes(value as NfcTagId);
 
+const isLayerId = (value: string): value is LayerId =>
+  LAYER_ORDER.includes(value as LayerId);
+
 const createEmptyLayerLevels = () =>
   LAYER_ORDER.reduce((levels, layerId) => ({ ...levels, [layerId]: 0 }), {} as LayerLevelState);
 
@@ -334,8 +337,38 @@ const App = () => {
       const nowLabel = formatNow();
       const readerStartMatch = line.match(/^PN532\s+(tag-[1-5])\s+(.+?):\s+trying/i);
       const tagReadMatch = line.match(/^TAG:\s*(tag-[1-5])\s*:?\s*([0-9a-fA-F:\-\s]*)/i);
+      const volumeMatch = line.match(/^VOLUME:\s*([a-z0-9-]+)\s*:\s*(\d{1,3})\s*$/i);
+      const muteMatch = line.match(/^MUTE:\s*([a-z0-9-]+)\s*:\s*([01])\s*$/i);
 
-      if (readerStartMatch) {
+      if (volumeMatch) {
+        const layerId = volumeMatch[1].toLowerCase();
+        if (isLayerId(layerId)) {
+          const volume = Math.max(0, Math.min(1, Number(volumeMatch[2]) / 100));
+          volumesRef.current = { ...volumesRef.current, [layerId]: volume };
+          setVolumes(volumesRef.current);
+          engineRef.current?.setVolume(layerId, volume);
+          setHardwareActivity({
+            kind: "serial",
+            title: `${getLayer(layerId)?.name ?? layerId} volume`,
+            detail: `${Math.round(volume * 100)}% from encoder`,
+            atLabel: nowLabel,
+          });
+        }
+      } else if (muteMatch) {
+        const layerId = muteMatch[1].toLowerCase();
+        if (isLayerId(layerId)) {
+          const muted = muteMatch[2] === "1";
+          mutesRef.current = { ...mutesRef.current, [layerId]: muted };
+          setMutes(mutesRef.current);
+          engineRef.current?.setMuted(layerId, muted);
+          setHardwareActivity({
+            kind: "serial",
+            title: `${getLayer(layerId)?.name ?? layerId} ${muted ? "muted" : "unmuted"}`,
+            detail: "Encoder button press",
+            atLabel: nowLabel,
+          });
+        }
+      } else if (readerStartMatch) {
         const tagId = readerStartMatch[1].toLowerCase();
         if (isNfcTagId(tagId)) {
           pendingReaderTagRef.current = tagId;

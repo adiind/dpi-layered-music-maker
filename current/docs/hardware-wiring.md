@@ -30,6 +30,9 @@ The ESP32 sends app-readable lines at `115200` baud:
 LAYER:<layerId>:<optionId>
 TAG:<tagId>:<uid>
 BUTTON:<layerId>:PRESS
+ENC:<layerId>:+1|-1
+VOLUME:<layerId>:<0-100>
+MUTE:<layerId>:0|1
 READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
 WRITE_READY:<tagId>:<payload>
 WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
@@ -38,7 +41,7 @@ WRITE_FAIL:<tagId>:<reason>
 TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 ```
 
-`LAYER` lines come from encoder turns and directly select one of the three options for that layer. `TAG` lines come from the five PN532 readers and apply the matching NFC Studio assignment for `tag-1` through `tag-5`.
+`VOLUME` and `MUTE` lines come from the five rotary encoders. Turning an encoder changes that layer's volume in 4% steps, and pressing the encoder toggles mute. `TAG` lines come from the five PN532 readers and apply the matching NFC Studio assignment for `tag-1` through `tag-5`. `LAYER` lines are still accepted by the app for other hardware/input experiments, but the current encoder firmware does not use encoder turns for option selection.
 
 The web app can also send:
 
@@ -158,8 +161,8 @@ GPIO12 is an ESP32 boot strapping pin. The NeoPixel data input is usually high i
 2. Flash `DPI_2.ino` to the ESP32 at `115200` baud.
 3. Open the web app, go to NFC Studio, click ESP32, and choose the serial port.
 4. Confirm each reader prints a `found PN5...` firmware line in the Hardware Feed.
-5. Turn each encoder and confirm lines like `LAYER:foundation:bass-guitar-b`.
-6. Press each encoder and confirm lines like `BUTTON:foundation:PRESS`.
+5. Turn each encoder and confirm lines like `ENC:foundation:+1` and `VOLUME:foundation:84`.
+6. Press each encoder and confirm lines like `BUTTON:foundation:PRESS`, `MUTE:foundation:1`, and `VOLUME:foundation:0`.
 7. Place an NFC tag on each reader and confirm lines like `TAG:tag-1:04:A1:B2:C3:D4:E5:80`.
 8. Move layer volume sliders and confirm the NeoPixel groups brighten/dim in yellow, orange, red, green, and blue.
 9. To program a card, select a reader slot and option in NFC Studio, click Write NTAG Card, hold the card on that reader, and wait for `WRITE_SUCCESS` or `WRITE_UNVERIFIED`.
