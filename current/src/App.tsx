@@ -478,6 +478,18 @@ const App = () => {
 
           if (uidAllowed) {
             setReaderLayerPresence(tagId, assignment.layerId);
+            if (assignment.uid && uid === assignment.uid) {
+              handleInputRef.current({
+                layerId: assignment.layerId,
+                optionId: assignment.optionId,
+                source: "hardware",
+                tagId,
+                uid,
+              }, {
+                cycleIfSame: false,
+                sourceLabel: `${getReaderLabel(tagId)} saved UID`,
+              });
+            }
             updateReaderStatus(tagId, {
               state: "tag-assigned",
               title: `${getReaderLabel(tagId)} card present`,

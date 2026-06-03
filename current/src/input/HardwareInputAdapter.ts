@@ -532,10 +532,6 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
 
     const tagRead = parseKnownTagLine(line);
     if (tagRead) {
-      const event = mapKnownTagToLayerInputEvent(tagRead.tagId, tagRead.uid);
-      if (event) {
-        this.emit(event);
-      }
       return;
     }
 
