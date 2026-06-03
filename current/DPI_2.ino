@@ -30,7 +30,8 @@ constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint16_t NFC_READ_TIMEOUT_MS = 120;
 constexpr uint16_t NFC_WRITE_READ_TIMEOUT_MS = 220;
 constexpr uint32_t NFC_REPEAT_WINDOW_MS = 1200;
-constexpr uint32_t NFC_REMOVED_WINDOW_MS = 1600;
+constexpr uint32_t NFC_REMOVED_WINDOW_MS = 2600;
+constexpr uint8_t NFC_REMOVED_MISS_COUNT = 5;
 constexpr uint32_t NFC_RETRY_WINDOW_MS = 3000;
 constexpr uint32_t NFC_WRITE_TIMEOUT_MS = 6000;
 constexpr uint16_t SERIAL_COMMAND_LIMIT = 160;
@@ -55,7 +56,7 @@ constexpr uint8_t PN532_CS_SOLO = 0;
 constexpr uint8_t NEOPIXEL_PIN = 12;
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
-constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 140;
+constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 70;
 
 Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
 Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
@@ -112,15 +113,16 @@ struct NfcReaderState {
   uint32_t lastRetryMs;
   uint32_t lastSeenMs;
   uint32_t lastPresenceEmitMs;
+  uint8_t missedReadCount;
   String lastUid;
 };
 
 NfcReaderState nfcReaders[] = {
-    {"tag-1", "foundation", "Foundation reader", PN532_CS_FOUNDATION, &nfcFoundation, false, false, 0, 0, 0, ""},
-    {"tag-2", "texture", "Texture reader", PN532_CS_TEXTURE, &nfcTexture, false, false, 0, 0, 0, ""},
-    {"tag-3", "drums", "Drums reader", PN532_CS_DRUMS, &nfcDrums, false, false, 0, 0, 0, ""},
-    {"tag-4", "keys", "Keys reader", PN532_CS_KEYS, &nfcKeys, false, false, 0, 0, 0, ""},
-    {"tag-5", "solo", "Solo reader", PN532_CS_SOLO, &nfcSolo, false, false, 0, 0, 0, ""},
+    {"tag-1", "foundation", "Foundation reader", PN532_CS_FOUNDATION, &nfcFoundation, false, false, 0, 0, 0, 0, ""},
+    {"tag-2", "texture", "Texture reader", PN532_CS_TEXTURE, &nfcTexture, false, false, 0, 0, 0, 0, ""},
+    {"tag-3", "drums", "Drums reader", PN532_CS_DRUMS, &nfcDrums, false, false, 0, 0, 0, 0, ""},
+    {"tag-4", "keys", "Keys reader", PN532_CS_KEYS, &nfcKeys, false, false, 0, 0, 0, 0, ""},
+    {"tag-5", "solo", "Solo reader", PN532_CS_SOLO, &nfcSolo, false, false, 0, 0, 0, 0, ""},
 };
 
 constexpr size_t LAYER_COUNT = sizeof(LAYERS) / sizeof(LAYERS[0]);
@@ -132,6 +134,7 @@ String lastNtagReadError;
 uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
 bool layerMuted[LAYER_COUNT] = {false, false, false, false, false};
 bool layerTagPresent[LAYER_COUNT] = {false, false, false, false, false};
+size_t nextNfcReaderIndex = 0;
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -198,6 +201,7 @@ static void renderNeoPixels() {
 static void setReaderLayerPresence(const NfcReaderState &readerState, bool present) {
   const int8_t layerIndex = findLayerIndex(readerState.layerId);
   if (layerIndex < 0) return;
+  if (layerTagPresent[layerIndex] == present) return;
 
   layerTagPresent[layerIndex] = present;
   renderNeoPixels();
@@ -999,6 +1003,7 @@ static bool startNfcReader(NfcReaderState &readerState) {
   readerState.tagPresent = false;
   readerState.lastSeenMs = 0;
   readerState.lastPresenceEmitMs = 0;
+  readerState.missedReadCount = 0;
   readerState.lastUid = "";
   setReaderLayerPresence(readerState, false);
   return true;
@@ -1032,10 +1037,18 @@ static void readNfcReader(NfcReaderState &readerState) {
 
   const uint32_t now = millis();
   if (!found) {
-    if (readerState.tagPresent && now - readerState.lastSeenMs >= NFC_REMOVED_WINDOW_MS) {
+    if (readerState.missedReadCount < 255) {
+      readerState.missedReadCount++;
+    }
+
+    if (
+        readerState.tagPresent &&
+        readerState.missedReadCount >= NFC_REMOVED_MISS_COUNT &&
+        now - readerState.lastSeenMs >= NFC_REMOVED_WINDOW_MS) {
       readerState.tagPresent = false;
       readerState.lastUid = "";
       readerState.lastPresenceEmitMs = now;
+      readerState.missedReadCount = 0;
       setReaderLayerPresence(readerState, false);
       printTagRemoved(readerState);
     }
@@ -1052,6 +1065,7 @@ static void readNfcReader(NfcReaderState &readerState) {
   readerState.tagPresent = true;
   readerState.lastUid = uidText;
   readerState.lastSeenMs = now;
+  readerState.missedReadCount = 0;
   setReaderLayerPresence(readerState, true);
 
   if (!wasPresent || uidChanged) {
@@ -1085,9 +1099,8 @@ static void readNfcReader(NfcReaderState &readerState) {
 }
 
 static void readNfcReaders() {
-  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
-    readNfcReader(nfcReaders[index]);
-  }
+  readNfcReader(nfcReaders[nextNfcReaderIndex]);
+  nextNfcReaderIndex = (nextNfcReaderIndex + 1) % NFC_READER_COUNT;
 }
 
 void setup() {

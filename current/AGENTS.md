@@ -1,4 +1,5 @@
 ## Codex
+- Stabilized NFC presence polling by round-robin polling one reader at a time, requiring multiple missed reads before tag removal, and lowering NeoPixel brightness.
 - Added NFC presence-gated playback and NeoPixel behavior so layers only sound and light while their reader has a card present.
 - Flashed the ESP32 firmware where encoders control volume/mute and GPIO12 drives the five-color 25-LED NeoPixel strip.
 - Changed ESP32 encoder behavior so turns control layer volume and button presses toggle mute, with UI/audio/NeoPixel sync from `VOLUME` and `MUTE` serial lines.
