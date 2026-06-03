@@ -1,6 +1,6 @@
 # DPI ESP32 Hardware Wiring
 
-This wiring is for the 38-pin ESP32-WROOM-32 dev board on the screw-terminal breakout, five KY-040 rotary encoders, and five PN532 NFC reader modules.
+This wiring is for the 38-pin ESP32-WROOM-32 dev board on the screw-terminal breakout, five KY-040 rotary encoders, five PN532 NFC reader modules, and one 25-LED NeoPixel / WS2812B strip.
 
 The current firmware lives at:
 
@@ -33,6 +33,7 @@ BUTTON:<layerId>:PRESS
 READ_CARD:<tagId>:<uid>:<layerId>:<optionId>:<payload>
 WRITE_READY:<tagId>:<payload>
 WRITE_SUCCESS:<tagId>:<uid>:<layerId>:<optionId>
+WRITE_UNVERIFIED:<tagId>:<uid>:<layerId>:<optionId>:<reason>
 WRITE_FAIL:<tagId>:<reason>
 TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 ```
@@ -43,9 +44,12 @@ The web app can also send:
 
 ```text
 WRITE:<tagId>:<layerId>:<optionId>
+VOLUME:<layerId>:<0-100>
 ```
 
-The firmware writes an NTAG NDEF URI payload such as `dpi://v1/layer/drums/option/drum-w-duck`, verifies it by reading the card back, and reports the result through the NFC Studio hardware feed.
+The firmware writes an NTAG NDEF URI payload such as `dpi://v1/layer/drums/option/drum-w-duck`, tries to verify it by reading the card back, and reports the result through the NFC Studio hardware feed. If the PN532 ACKs the write but card memory readback is flaky, the firmware reports `WRITE_UNVERIFIED` so the app can still save the UID for the demo.
+
+The app sends `VOLUME` commands whenever layer sliders or mutes change. The ESP32 maps those values to NeoPixel brightness.
 
 ## Wiring Diagram
 
@@ -64,6 +68,7 @@ flowchart LR
   E3["KY-040 Encoder 3<br/>Drums"]
   E4["KY-040 Encoder 4<br/>Keys"]
   E5["KY-040 Encoder 5<br/>Solo"]
+  LED["25 NeoPixel strip<br/>5 LEDs per layer<br/>DIN GPIO12"]
 
   USB --> ESP
   ESP --> BUS
@@ -82,6 +87,7 @@ flowchart LR
   ESP -- "CLK16 DT17 SW13<br/>3V3 GND" --> E3
   ESP -- "CLK34 DT35 SW21<br/>3V3 GND" --> E4
   ESP -- "CLK36 DT39 SW22<br/>3V3 GND" --> E5
+  ESP -- "DIN12 + 5V + GND" --> LED
 ```
 
 ## Shared PN532 SPI Wiring
@@ -124,6 +130,28 @@ Wire every KY-040 `VCC` pin to ESP32 `3V3`, and every `GND` pin to ESP32 `GND`.
 
 GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide internal pullups. They are only used for encoder CLK/DT signals here. If the Keys or Solo encoders feel unstable, add external 10k pullup resistors from those CLK/DT lines to 3V3.
 
+## NeoPixel Strip Wiring
+
+The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs:
+
+| LEDs | Layer | Color |
+| --- | --- | --- |
+| 0-4 | Foundation / Reader 1 | Yellow |
+| 5-9 | Texture / Reader 2 | Orange |
+| 10-14 | Drums / Reader 3 | Red |
+| 15-19 | Keys / Reader 4 | Green |
+| 20-24 | Solo / Reader 5 | Blue |
+
+Wire the strip like this:
+
+| NeoPixel strip | ESP32 / power | Notes |
+| --- | --- | --- |
+| DIN / DI | GPIO12 / P12 | Add a 330-470 ohm resistor in series if you have one. |
+| GND | GND | Must share ground with ESP32 and external LED power. |
+| 5V | External 5V recommended | 25 LEDs can pull more current than the ESP32 5V pin should provide at high brightness. |
+
+GPIO12 is an ESP32 boot strapping pin. The NeoPixel data input is usually high impedance, but if flashing or booting becomes unreliable, unplug the NeoPixel DIN wire while flashing and reconnect after boot.
+
 ## First Bring-Up
 
 1. Set all five PN532 boards to SPI mode.
@@ -133,7 +161,8 @@ GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide intern
 5. Turn each encoder and confirm lines like `LAYER:foundation:bass-guitar-b`.
 6. Press each encoder and confirm lines like `BUTTON:foundation:PRESS`.
 7. Place an NFC tag on each reader and confirm lines like `TAG:tag-1:04:A1:B2:C3:D4:E5:80`.
-8. To program a card, select a reader slot and option in NFC Studio, click Write NTAG Card, hold the card on that reader, and wait for `WRITE_SUCCESS`.
+8. Move layer volume sliders and confirm the NeoPixel groups brighten/dim in yellow, orange, red, green, and blue.
+9. To program a card, select a reader slot and option in NFC Studio, click Write NTAG Card, hold the card on that reader, and wait for `WRITE_SUCCESS` or `WRITE_UNVERIFIED`.
 
 ## Pins To Avoid
 

@@ -1,9 +1,14 @@
 #include <Arduino.h>
+#include <Adafruit_NeoPixel.h>
 #include <Adafruit_PN532.h>
 
 // DPI final demo controller for an ESP32-WROOM-32 / 38-pin dev board.
 // Hardware: 5x KY-040 rotary encoders and 5x PN532 readers in SPI mode.
 // Serial baud: 115200.
+//
+// App-to-controller serial commands:
+//   WRITE:<tagId>:<layerId>:<optionId>
+//   VOLUME:<layerId>:<0-100>
 //
 // App-readable serial events:
 //   LAYER:<layerId>:<optionId>
@@ -40,24 +45,33 @@ constexpr uint8_t PN532_CS_DRUMS = 15;
 constexpr uint8_t PN532_CS_KEYS = 2;
 constexpr uint8_t PN532_CS_SOLO = 0;
 
+constexpr uint8_t NEOPIXEL_PIN = 12;
+constexpr uint8_t NEOPIXEL_COUNT = 25;
+constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
+constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 140;
+
 Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
 Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
 Adafruit_PN532 nfcDrums(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_DRUMS);
 Adafruit_PN532 nfcKeys(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_KEYS);
 Adafruit_PN532 nfcSolo(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_SOLO);
+Adafruit_NeoPixel layerPixels(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 struct LayerSpec {
   const char *id;
   const char *name;
   const char *options[3];
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
 };
 
 const LayerSpec LAYERS[] = {
-    {"foundation", "Foundation", {"bass-guitar", "bass-guitar-b", "bouncy-synth-chords"}},
-    {"texture", "Texture", {"synth-wavey", "brushed-snare", "ethereal-echo-thing"}},
-    {"drums", "Drums", {"drum-simple", "drum-poom-tss", "drum-w-duck"}},
-    {"keys", "Keys", {"piano-1", "piano-2", "piano-3"}},
-    {"solo", "Solo", {"guitar-notes", "distort-guitar", "piano-solo"}},
+    {"foundation", "Foundation", {"bass-guitar", "bass-guitar-b", "bouncy-synth-chords"}, 255, 210, 0},
+    {"texture", "Texture", {"synth-wavey", "brushed-snare", "ethereal-echo-thing"}, 255, 116, 0},
+    {"drums", "Drums", {"drum-simple", "drum-poom-tss", "drum-w-duck"}, 255, 35, 30},
+    {"keys", "Keys", {"piano-1", "piano-2", "piano-3"}, 0, 190, 80},
+    {"solo", "Solo", {"guitar-notes", "distort-guitar", "piano-solo"}, 0, 120, 255},
 };
 
 struct EncoderState {
@@ -107,6 +121,7 @@ constexpr size_t NFC_READER_COUNT = sizeof(nfcReaders) / sizeof(nfcReaders[0]);
 
 String serialCommand;
 String lastNtagReadError;
+uint8_t layerVolumes[LAYER_COUNT] = {80, 75, 70, 78, 82};
 
 // Quadrature transition table. Four valid transitions make one detent.
 const int8_t QUADRATURE_TABLE[16] = {
@@ -134,6 +149,51 @@ static const LayerSpec *findLayer(const char *layerId) {
   }
 
   return nullptr;
+}
+
+static int8_t findLayerIndex(const char *layerId) {
+  for (size_t index = 0; index < LAYER_COUNT; index++) {
+    if (strcmp(LAYERS[index].id, layerId) == 0) {
+      return (int8_t)index;
+    }
+  }
+
+  return -1;
+}
+
+static uint8_t scaleColor(uint8_t value, uint8_t volumePercent) {
+  const uint16_t scaledBrightness = ((uint16_t)NEOPIXEL_MAX_BRIGHTNESS * volumePercent) / 100;
+  return ((uint16_t)value * scaledBrightness) / 255;
+}
+
+static void renderNeoPixels() {
+  for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
+    const LayerSpec &layer = LAYERS[layerIndex];
+    const uint8_t volume = layerVolumes[layerIndex];
+    const uint8_t red = scaleColor(layer.red, volume);
+    const uint8_t green = scaleColor(layer.green, volume);
+    const uint8_t blue = scaleColor(layer.blue, volume);
+
+    for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
+      const uint16_t pixelIndex = (layerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
+      if (pixelIndex < NEOPIXEL_COUNT) {
+        layerPixels.setPixelColor(pixelIndex, red, green, blue);
+      }
+    }
+  }
+
+  layerPixels.show();
+}
+
+static bool setLayerVolume(const char *layerId, int percent) {
+  const int8_t layerIndex = findLayerIndex(layerId);
+  if (layerIndex < 0) {
+    return false;
+  }
+
+  layerVolumes[layerIndex] = constrain(percent, 0, 100);
+  renderNeoPixels();
+  return true;
 }
 
 static NfcReaderState *findNfcReader(const char *tagId) {
@@ -790,6 +850,29 @@ static void handleWriteCommand(const String &command) {
   writeDpiPayloadToTag(*readerState, *layer, option);
 }
 
+static void handleVolumeCommand(const String &command) {
+  const int firstSeparator = command.indexOf(':');
+  const int secondSeparator = command.indexOf(':', firstSeparator + 1);
+
+  if (firstSeparator < 0 || secondSeparator < 0) {
+    Serial.println("VOLUME_FAIL:bad-command");
+    return;
+  }
+
+  const String layerId = command.substring(firstSeparator + 1, secondSeparator);
+  const String percentValue = command.substring(secondSeparator + 1);
+
+  if (layerId.length() == 0 || percentValue.length() == 0) {
+    Serial.println("VOLUME_FAIL:empty-field");
+    return;
+  }
+
+  if (!setLayerVolume(layerId.c_str(), percentValue.toInt())) {
+    Serial.print("VOLUME_FAIL:unknown-layer:");
+    Serial.println(layerId);
+  }
+}
+
 static void handleSerialCommand(const String &command) {
   if (command.length() == 0) {
     return;
@@ -797,6 +880,8 @@ static void handleSerialCommand(const String &command) {
 
   if (command.startsWith("WRITE:")) {
     handleWriteCommand(command);
+  } else if (command.startsWith("VOLUME:")) {
+    handleVolumeCommand(command);
   }
 }
 
@@ -937,7 +1022,15 @@ void setup() {
   Serial.println();
   Serial.println("DPI ESP32 layer controller");
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
-  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG:<tagId>:<uid>, WRITE:<tagId>:<layerId>:<optionId>");
+  Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG:<tagId>:<uid>, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>");
+
+  layerPixels.begin();
+  layerPixels.clear();
+  renderNeoPixels();
+  Serial.print("NeoPixel strip: DATA GPIO");
+  Serial.print(NEOPIXEL_PIN);
+  Serial.print(", LEDs ");
+  Serial.println(NEOPIXEL_COUNT);
 
   for (size_t index = 0; index < NFC_READER_COUNT; index++) {
     pinMode(nfcReaders[index].csPin, OUTPUT);

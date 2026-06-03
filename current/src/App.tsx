@@ -130,6 +130,8 @@ const App = () => {
   const handleInputRef = useRef<(event: LayerInputEvent, options?: InputEventOptions) => void>(() => undefined);
   const selectionsRef = useRef<SelectionState>({ ...DEFAULT_SELECTIONS });
   const nfcAssignmentsRef = useRef<NfcTagAssignment[]>([]);
+  const volumesRef = useRef<VolumeState>({ ...DEFAULT_VOLUMES });
+  const mutesRef = useRef<MuteState>({ ...DEFAULT_MUTES });
   const pendingReaderTagRef = useRef<NfcTagId | null>(null);
   const changeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -159,6 +161,24 @@ const App = () => {
   useEffect(() => {
     nfcAssignmentsRef.current = nfcAssignments;
   }, [nfcAssignments]);
+
+  useEffect(() => {
+    volumesRef.current = volumes;
+  }, [volumes]);
+
+  useEffect(() => {
+    mutesRef.current = mutes;
+  }, [mutes]);
+
+  const sendLayerVolumeToHardware = useCallback((layerId: LayerId, volume: number, muted = mutesRef.current[layerId]) => {
+    void hardwareAdapterRef.current?.setLayerVolume(layerId, muted ? 0 : volume);
+  }, []);
+
+  const syncHardwareVolumes = useCallback(() => {
+    LAYER_ORDER.forEach((layerId) => {
+      sendLayerVolumeToHardware(layerId, volumesRef.current[layerId], mutesRef.current[layerId]);
+    });
+  }, [sendLayerVolumeToHardware]);
 
   useEffect(() => {
     const engine = new StemMusicEngine();
@@ -295,6 +315,7 @@ const App = () => {
           detail: status.portName ?? "Serial port connected.",
           atLabel: formatNow(),
         });
+        syncHardwareVolumes();
       }
 
       if (status.state === "unsupported" || status.state === "error") {
@@ -558,7 +579,7 @@ const App = () => {
       void adapter.disconnect();
       hardwareAdapterRef.current = null;
     };
-  }, []);
+  }, [syncHardwareVolumes]);
 
   useEffect(() => {
     const adapter = new KeyboardNfcMockAdapter(resolveNextOption);
@@ -740,18 +761,20 @@ const App = () => {
     setSelections(nextSelections);
   };
 
-  const handleToggleMute = (layerId: LayerId) => {
+  const handleToggleMute = useCallback((layerId: LayerId) => {
     setMutes((current) => {
       const next = { ...current, [layerId]: !current[layerId] };
       engineRef.current?.setMuted(layerId, next[layerId]);
+      sendLayerVolumeToHardware(layerId, volumesRef.current[layerId], next[layerId]);
       return next;
     });
-  };
+  }, [sendLayerVolumeToHardware]);
 
-  const handleVolume = (layerId: LayerId, volume: number) => {
+  const handleVolume = useCallback((layerId: LayerId, volume: number) => {
     setVolumes((current) => ({ ...current, [layerId]: volume }));
     engineRef.current?.setVolume(layerId, volume);
-  };
+    sendLayerVolumeToHardware(layerId, volume);
+  }, [sendLayerVolumeToHardware]);
 
   const layerColumns = useMemo(
     () =>
@@ -770,7 +793,7 @@ const App = () => {
           onVolume={handleVolume}
         />
       )),
-    [handleSelect, mutes, recentLayerId, selections, tick.activeLayers, tick.layerLevels, volumes],
+    [handleSelect, handleToggleMute, handleVolume, mutes, recentLayerId, selections, tick.activeLayers, tick.layerLevels, volumes],
   );
 
   return (

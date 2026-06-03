@@ -329,6 +329,16 @@ export class WebSerialNfcAdapter implements LayerInputAdapter {
     this.emitLine(`> ${command.trim()}`);
   }
 
+  async setLayerVolume(layerId: LayerId, volume: number) {
+    if (!this.port || !this.writer || !isLayerId(layerId)) {
+      return;
+    }
+
+    const percent = Math.max(0, Math.min(100, Math.round(volume * 100)));
+    const command = `VOLUME:${layerId}:${percent}\n`;
+    await this.writer.write(new TextEncoder().encode(command));
+  }
+
   async requestAndConnect(options?: WebSerialNfcRequestOptions) {
     const serial = getSerial();
     if (!serial) {
