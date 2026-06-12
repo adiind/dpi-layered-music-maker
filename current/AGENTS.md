@@ -1,4 +1,5 @@
 ## Codex
+- Published the DPI Layer Mixer as a public GitHub portfolio snapshot with a polished course-project README, screenshots, synced current source, and updated repo metadata.
 - Moved encoder direction correction fully into firmware for all layers and removed browser-side volume inversion; build/lint/compile passed but flashing is waiting for the ESP32 USB serial port.
 - Flashed the CS-first NFC recovery firmware and verified the new boot line, but all five PN532 readers still reported no response.
 - Moved PN532 CS pins to OUTPUT+HIGH before NeoPixel startup for NFC recovery.
