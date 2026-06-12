@@ -41,7 +41,7 @@ WRITE_FAIL:<tagId>:<reason>
 TAG_UNSUPPORTED:<tagId>:<uid>:uid-length-{n}
 ```
 
-`VOLUME` and `MUTE` lines come from the five rotary encoders. Turning an encoder changes that layer's volume in 4% steps, and pressing the encoder toggles mute. `TAG` lines come from the five PN532 readers and apply the matching NFC Studio assignment for `tag-1` through `tag-5`. `LAYER` lines are still accepted by the app for other hardware/input experiments, but the current encoder firmware does not use encoder turns for option selection.
+`VOLUME` and `MUTE` lines come from the rotary encoders. Turning an encoder changes that layer's volume in 4% steps. Pressing the Foundation, Texture, Drums, or Keys encoder toggles mute; the Solo encoder's `SW` pin is reused for NeoPixel data, so Solo mute is still available from the app UI. `TAG` lines come from the five PN532 readers and apply the matching NFC Studio assignment for `tag-1` through `tag-5`. `LAYER` lines are still accepted by the app for other hardware/input experiments, but the current encoder firmware does not use encoder turns for option selection.
 
 The web app can also send:
 
@@ -71,7 +71,7 @@ flowchart LR
   E3["KY-040 Encoder 3<br/>Drums"]
   E4["KY-040 Encoder 4<br/>Keys"]
   E5["KY-040 Encoder 5<br/>Solo"]
-  LED["25 NeoPixel strip<br/>5 LEDs per layer<br/>DIN GPIO12 / P12"]
+  LED["25 NeoPixel strip<br/>5 LEDs per layer<br/>DIN GPIO22 / P22"]
 
   USB --> ESP
   ESP --> BUS
@@ -89,8 +89,8 @@ flowchart LR
   ESP -- "CLK26 DT27 SW14<br/>3V3 GND" --> E2
   ESP -- "CLK16 DT17 SW13<br/>3V3 GND" --> E3
   ESP -- "CLK34 DT35 SW21<br/>3V3 GND" --> E4
-  ESP -- "CLK36 DT39 SW22<br/>3V3 GND" --> E5
-  ESP -- "DIN12/P12 + 5V + GND" --> LED
+  ESP -- "CLK36 DT39<br/>SW not wired<br/>3V3 GND" --> E5
+  ESP -- "DIN22/P22 + 5V + GND" --> LED
 ```
 
 ## Shared PN532 SPI Wiring
@@ -129,17 +129,17 @@ Wire every KY-040 `VCC` or `+` pin to ESP32 `3V3`, and every `GND` pin to ESP32 
 | Texture | GPIO26 | GPIO27 | GPIO14 | `texture` |
 | Drums | GPIO16 | GPIO17 | GPIO13 | `drums` |
 | Keys | GPIO34 | GPIO35 | GPIO21 | `keys` |
-| Solo | GPIO36 | GPIO39 | GPIO22 | `solo` |
+| Solo | GPIO36 | GPIO39 | Not wired; GPIO22 is NeoPixel DIN | `solo` |
 
 GPIO34, GPIO35, GPIO36, and GPIO39 are input-only pins and do not provide internal pullups. They are only used for encoder CLK/DT signals here. If the Keys or Solo encoders feel unstable, add external 10k pullup resistors from those CLK/DT lines to 3V3.
 
-This saved firmware snapshot prioritizes the stable NFC reader setup confirmed on the physical rig. If an encoder direction is physically reversed, swap that encoder's `CLK` and `DT` wires after confirming NFC remains stable.
+The firmware reverses the rotation direction for all encoders so the physical direction matches the UI volume direction with the current wiring. The Solo encoder still rotates normally, but its physical press is intentionally unavailable because GPIO22 now drives the LED strip.
 
 If the app connects to the ESP32 but rotating an encoder prints no `ENC:<layer>:+1/-1` or `VOLUME:<layer>:<0-100>` lines in Hardware Feed, test only the Foundation encoder first: `+` to `3V3`, `GND` to `GND`, `CLK` to GPIO32, and `DT` to GPIO33. If that still prints nothing, check the KY-040 pin labels, common ground, power, and screw-terminal row before debugging the browser UI.
 
 ## NeoPixel Strip Wiring
 
-The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs. This build has `NEOPIXEL_REVERSE_LAYER_ORDER` enabled because the installed strip runs opposite the UI order.
+The firmware expects a 25 LED WS2812B / NeoPixel strip. The strip is split into five groups of five LEDs. This build has `NEOPIXEL_REVERSE_LAYER_ORDER` enabled because the installed strip runs opposite the UI order. Empty reader slots keep one tiny center idle dot per layer, and the firmware caps brightness/current so the strip does not yank the USB/power rail around.
 
 | LEDs | Layer | Color |
 | --- | --- | --- |
@@ -153,11 +153,11 @@ Wire the strip like this:
 
 | NeoPixel strip | ESP32 / power | Notes |
 | --- | --- | --- |
-| DIN / DI | GPIO12 / P12 | Add a 330-470 ohm resistor in series if you have one. |
+| DIN / DI | GPIO22 / P22 | Reuses the Solo encoder `SW` pin. Add a 330-470 ohm resistor in series if you have one. |
 | GND | GND | Must share ground with ESP32 and external LED power. |
-| 5V | External 5V recommended | 25 LEDs can pull more current than the ESP32 5V pin should provide at high brightness. |
+| 5V | External 5V recommended | Firmware brightness is limited, but external 5V is still safer than pulling LED power through the ESP32 board. |
 
-GPIO12 is an ESP32 boot strapping pin. With this many modules there is no clean unused safe output left, so the current build keeps NeoPixel data on P12. If flashing or booting becomes unreliable, unplug NeoPixel DIN while uploading, or add a 10k pulldown from P12 to GND plus a 330-470 ohm series resistor between P12 and strip DIN. Moving the strip to another safe GPIO requires giving up or remapping one button/reader pin.
+GPIO22 is a normal output-capable pin, so this avoids the GPIO12 boot-strapping risk. Do not connect the Solo KY-040 `SW` wire while NeoPixel DIN is on GPIO22; pressing that button would short the LED data line to ground. Solo volume rotation still works because CLK/DT remain on GPIO36/GPIO39.
 
 ## NFC Recognition Stability
 
@@ -177,9 +177,9 @@ Five PN532 readers on one ESP32 can become marginal if the RF field or power rai
 3. Open the web app, go to NFC Studio, click ESP32, and choose the serial port.
 4. Confirm each reader prints a `found PN5...` firmware line in the Hardware Feed.
 5. Turn each encoder and confirm lines like `ENC:foundation:+1` and `VOLUME:foundation:84`.
-6. Press each encoder and confirm lines like `BUTTON:foundation:PRESS`, `MUTE:foundation:1`, and `VOLUME:foundation:0`.
+6. Press the Foundation, Texture, Drums, and Keys encoders and confirm lines like `BUTTON:foundation:PRESS`, `MUTE:foundation:1`, and `VOLUME:foundation:0`. The Solo encoder press is intentionally disabled because GPIO22 drives NeoPixel DIN.
 7. Place an NFC tag on each reader and confirm lines like `TAG:tag-1:04:A1:B2:C3:D4:E5:80`.
-8. Confirm the NeoPixel strip flashes all five layer colors at boot, then settles to one center LED per layer. Move layer volume sliders and confirm the groups brighten/dim in light blue, red, yellow, dark blue, and orange.
+8. Confirm the NeoPixel strip gives a brief dim flash of all five layer colors at boot, then settles to one tiny center idle dot per empty slot. Move layer volume sliders with cards present and confirm the groups brighten/dim in light blue, red, yellow, dark blue, and orange.
 9. To program a card, select a reader slot and option in NFC Studio, click Write NTAG Card, hold the card on that reader, and wait for `WRITE_SUCCESS` or `WRITE_UNVERIFIED`.
 
 ## Pins To Avoid

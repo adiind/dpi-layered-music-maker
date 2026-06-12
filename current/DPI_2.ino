@@ -41,6 +41,7 @@ constexpr uint16_t NDEF_READ_LIMIT = 160;
 constexpr size_t DPI_PAYLOAD_LIMIT = 96;
 constexpr uint32_t BUTTON_DEBOUNCE_MS = 45;
 constexpr uint8_t ENCODER_VOLUME_STEP_PERCENT = 4;
+constexpr int8_t ENCODER_VOLUME_DIRECTION = -1;
 constexpr uint8_t PN532_PASSIVE_ACTIVATION_RETRIES = 0x03;
 
 const char DPI_PAYLOAD_PREFIX[] = "dpi://v1/layer/";
@@ -56,18 +57,19 @@ constexpr uint8_t PN532_CS_DRUMS = 15;
 constexpr uint8_t PN532_CS_KEYS = 2;
 constexpr uint8_t PN532_CS_SOLO = 0;
 
-constexpr uint8_t NEOPIXEL_PIN = 12;
+constexpr uint8_t NEOPIXEL_PIN = 22;  // Reuses the Solo encoder SW pin; leave Solo SW disconnected.
 constexpr uint8_t NEOPIXEL_COUNT = 25;
 constexpr uint8_t NEOPIXELS_PER_LAYER = 5;
 constexpr bool NEOPIXEL_REVERSE_LAYER_ORDER = true;
-constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 70;
-constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 35;
-constexpr uint8_t NEOPIXEL_SELF_TEST_PERCENT = 85;
-constexpr uint8_t NEOPIXEL_BREATHE_MIN_PERCENT = 38;
-constexpr uint8_t NEOPIXEL_BREATHE_MAX_PERCENT = 115;
+constexpr uint8_t NEOPIXEL_MAX_BRIGHTNESS = 28;
+constexpr uint8_t NEOPIXEL_IDLE_CENTER_PERCENT = 20;
+constexpr uint8_t NEOPIXEL_SELF_TEST_PERCENT = 18;
+constexpr uint8_t NEOPIXEL_BREATHE_MIN_PERCENT = 20;
+constexpr uint8_t NEOPIXEL_BREATHE_MAX_PERCENT = 70;
+constexpr uint16_t NEOPIXEL_CURRENT_LIMIT_MA = 180;
 constexpr uint16_t NEOPIXEL_BREATHE_PERIOD_MS = 500;
 constexpr uint16_t NEOPIXEL_FRAME_MS = 33;
-constexpr uint16_t NEOPIXEL_SELF_TEST_MS = 900;
+constexpr uint16_t NEOPIXEL_SELF_TEST_MS = 250;
 
 Adafruit_PN532 nfcFoundation(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_FOUNDATION);
 Adafruit_PN532 nfcTexture(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_CS_TEXTURE);
@@ -161,6 +163,10 @@ const int8_t QUADRATURE_TABLE[16] = {
 
 static bool supportsInternalPullup(uint8_t pin) {
   return pin < 34;
+}
+
+static bool encoderButtonEnabled(const EncoderState &encoder) {
+  return encoder.swPin != NEOPIXEL_PIN;
 }
 
 static uint8_t readEncoderState(const EncoderState &encoder) {
@@ -278,8 +284,45 @@ static uint16_t getLayerNeoPixelIndex(size_t layerIndex, uint8_t pixelOffset) {
   return (physicalLayerIndex * NEOPIXELS_PER_LAYER) + pixelOffset;
 }
 
+static uint16_t estimateNeoPixelCurrentMa(uint8_t red, uint8_t green, uint8_t blue) {
+  return (((uint16_t)red + green + blue) * 20) / 255;
+}
+
+static void enforceNeoPixelCurrentLimit(uint8_t redFrame[], uint8_t greenFrame[], uint8_t blueFrame[]) {
+  uint16_t estimatedCurrentMa = 0;
+
+  for (uint8_t pixelIndex = 0; pixelIndex < NEOPIXEL_COUNT; pixelIndex++) {
+    estimatedCurrentMa += estimateNeoPixelCurrentMa(redFrame[pixelIndex], greenFrame[pixelIndex], blueFrame[pixelIndex]);
+  }
+
+  if (estimatedCurrentMa <= NEOPIXEL_CURRENT_LIMIT_MA || estimatedCurrentMa == 0) {
+    return;
+  }
+
+  const uint16_t scale = ((uint32_t)NEOPIXEL_CURRENT_LIMIT_MA * 255) / estimatedCurrentMa;
+  for (uint8_t pixelIndex = 0; pixelIndex < NEOPIXEL_COUNT; pixelIndex++) {
+    redFrame[pixelIndex] = ((uint16_t)redFrame[pixelIndex] * scale) / 255;
+    greenFrame[pixelIndex] = ((uint16_t)greenFrame[pixelIndex] * scale) / 255;
+    blueFrame[pixelIndex] = ((uint16_t)blueFrame[pixelIndex] * scale) / 255;
+  }
+}
+
+static void showNeoPixelFrame(uint8_t redFrame[], uint8_t greenFrame[], uint8_t blueFrame[]) {
+  enforceNeoPixelCurrentLimit(redFrame, greenFrame, blueFrame);
+
+  for (uint8_t pixelIndex = 0; pixelIndex < NEOPIXEL_COUNT; pixelIndex++) {
+    layerPixels.setPixelColor(pixelIndex, redFrame[pixelIndex], greenFrame[pixelIndex], blueFrame[pixelIndex]);
+  }
+
+  layerPixels.show();
+  lastNeoPixelFrameMs = millis();
+}
+
 static void renderNeoPixels() {
   const uint8_t pulsePercent = transportPlaying ? getNeoPixelPulsePercent() : 100;
+  uint8_t redFrame[NEOPIXEL_COUNT] = {0};
+  uint8_t greenFrame[NEOPIXEL_COUNT] = {0};
+  uint8_t blueFrame[NEOPIXEL_COUNT] = {0};
 
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
@@ -310,20 +353,23 @@ static void renderNeoPixels() {
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
       const uint16_t pixelIndex = getLayerNeoPixelIndex(layerIndex, pixelOffset);
       if (pixelIndex < NEOPIXEL_COUNT) {
-        if (centerOnly && pixelOffset != NEOPIXELS_PER_LAYER / 2) {
-          layerPixels.setPixelColor(pixelIndex, 0, 0, 0);
-        } else {
-          layerPixels.setPixelColor(pixelIndex, red, green, blue);
+        if (!centerOnly || pixelOffset == NEOPIXELS_PER_LAYER / 2) {
+          redFrame[pixelIndex] = red;
+          greenFrame[pixelIndex] = green;
+          blueFrame[pixelIndex] = blue;
         }
       }
     }
   }
 
-  layerPixels.show();
-  lastNeoPixelFrameMs = millis();
+  showNeoPixelFrame(redFrame, greenFrame, blueFrame);
 }
 
 static void showNeoPixelSelfTest() {
+  uint8_t redFrame[NEOPIXEL_COUNT] = {0};
+  uint8_t greenFrame[NEOPIXEL_COUNT] = {0};
+  uint8_t blueFrame[NEOPIXEL_COUNT] = {0};
+
   for (size_t layerIndex = 0; layerIndex < LAYER_COUNT; layerIndex++) {
     const LayerSpec &layer = LAYERS[layerIndex];
     const uint8_t red = scaleColor(layer.red, NEOPIXEL_SELF_TEST_PERCENT);
@@ -333,12 +379,14 @@ static void showNeoPixelSelfTest() {
     for (uint8_t pixelOffset = 0; pixelOffset < NEOPIXELS_PER_LAYER; pixelOffset++) {
       const uint16_t pixelIndex = getLayerNeoPixelIndex(layerIndex, pixelOffset);
       if (pixelIndex < NEOPIXEL_COUNT) {
-        layerPixels.setPixelColor(pixelIndex, red, green, blue);
+        redFrame[pixelIndex] = red;
+        greenFrame[pixelIndex] = green;
+        blueFrame[pixelIndex] = blue;
       }
     }
   }
 
-  layerPixels.show();
+  showNeoPixelFrame(redFrame, greenFrame, blueFrame);
   delay(NEOPIXEL_SELF_TEST_MS);
   renderNeoPixels();
 }
@@ -538,12 +586,16 @@ static void readEncoders() {
 
     if (pendingSteps > 0) {
       for (int16_t step = 0; step < pendingSteps; step++) {
-        adjustLayerVolumeFromEncoder(encoder, 1);
+        adjustLayerVolumeFromEncoder(encoder, ENCODER_VOLUME_DIRECTION);
       }
     } else if (pendingSteps < 0) {
       for (int16_t step = 0; step > pendingSteps; step--) {
-        adjustLayerVolumeFromEncoder(encoder, -1);
+        adjustLayerVolumeFromEncoder(encoder, -ENCODER_VOLUME_DIRECTION);
       }
+    }
+
+    if (!encoderButtonEnabled(encoder)) {
+      continue;
     }
 
     const bool buttonPressed = digitalRead(encoder.swPin) == LOW;
@@ -1345,6 +1397,12 @@ void setup() {
   Serial.println("5x KY-040 encoders + 5x PN532 SPI readers");
   Serial.println("Serial protocol: LAYER:<layerId>:<optionId>, TAG/TAG_PRESENT/TAG_REMOVED, WRITE:<tagId>:<layerId>:<optionId>, VOLUME:<layerId>:<0-100>, LED:<tagId>:off|ok|bad, PLAY:0|1");
 
+  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
+    pinMode(nfcReaders[index].csPin, OUTPUT);
+    digitalWrite(nfcReaders[index].csPin, HIGH);
+  }
+  Serial.println("NFC CS pins: all OUTPUT+HIGH");
+
   layerPixels.begin();
   layerPixels.clear();
   showNeoPixelSelfTest();
@@ -1355,19 +1413,17 @@ void setup() {
   Serial.print(", reverse layer order ");
   Serial.println(NEOPIXEL_REVERSE_LAYER_ORDER ? "on" : "off");
 
-  for (size_t index = 0; index < NFC_READER_COUNT; index++) {
-    pinMode(nfcReaders[index].csPin, OUTPUT);
-    digitalWrite(nfcReaders[index].csPin, HIGH);
-  }
-
   for (size_t index = 0; index < ENCODER_COUNT; index++) {
     EncoderState &encoder = encoders[index];
 
     pinMode(encoder.clkPin, supportsInternalPullup(encoder.clkPin) ? INPUT_PULLUP : INPUT);
     pinMode(encoder.dtPin, supportsInternalPullup(encoder.dtPin) ? INPUT_PULLUP : INPUT);
-    pinMode(encoder.swPin, INPUT_PULLUP);
+    const bool buttonEnabled = encoderButtonEnabled(encoder);
+    if (buttonEnabled) {
+      pinMode(encoder.swPin, INPUT_PULLUP);
+    }
     encoder.lastState = readEncoderState(encoder);
-    encoder.lastButtonPressed = digitalRead(encoder.swPin) == LOW;
+    encoder.lastButtonPressed = buttonEnabled && digitalRead(encoder.swPin) == LOW;
 
     Serial.print("Encoder ");
     Serial.print(encoder.label);
@@ -1375,8 +1431,14 @@ void setup() {
     Serial.print(encoder.clkPin);
     Serial.print(", DT GPIO");
     Serial.print(encoder.dtPin);
-    Serial.print(", SW GPIO");
-    Serial.print(encoder.swPin);
+    if (buttonEnabled) {
+      Serial.print(", SW GPIO");
+      Serial.print(encoder.swPin);
+    } else {
+      Serial.print(", SW disabled, GPIO");
+      Serial.print(encoder.swPin);
+      Serial.print(" used for NeoPixel DIN");
+    }
     Serial.print(", state CLK ");
     Serial.print((encoder.lastState >> 1) & 1);
     Serial.print(", DT ");

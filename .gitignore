@@ -1,8 +1,10 @@
 node_modules/
 dist/
+build/
 tmp/
 .cache/
 .vite/
+.claude/
 .playwright-mcp/
 .DS_Store
 .env
@@ -12,3 +14,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+DPI Music/
+current/DPI Music/
+*.aup3

@@ -46,11 +46,12 @@ The ESP32 firmware in `DPI_2.ino` handles:
 - PN532 NFC polling for five readers.
 - NFC card payload reads/writes using `dpi://v1/layer/<layer>/option/<option>`.
 - KY-040 rotary encoder volume using GPIO interrupts.
-- KY-040 button mute when `SW` is wired.
-- NeoPixel layer indicators on GPIO12 / P12.
+- KY-040 button mute for Foundation, Texture, Drums, and Keys when `SW` is wired.
+- Low-power NeoPixel layer indicators on GPIO22 / P22, reusing the Solo encoder `SW` pin.
 
 `SW` is optional for rotation. A KY-040 only needs `+`, `GND`, `CLK`, and `DT` to control volume.
-This saved firmware snapshot prioritizes the stable NFC reader setup that was confirmed on the physical rig.
+The Solo encoder still controls volume by rotation; its physical press is intentionally sacrificed for the LED strip data line.
+All encoder rotation is direction-corrected in firmware for the current physical wiring.
 
 ## Hardware Bring-Up
 
@@ -69,7 +70,9 @@ Detailed wiring is in [`docs/hardware-wiring.md`](docs/hardware-wiring.md).
 ```bash
 npm run build
 npm run lint
-arduino-cli compile --fqbn esp32:esp32:esp32 DPI_2.ino
+rm -rf /tmp/DPI_2 && mkdir -p /tmp/DPI_2
+cp DPI_2.ino /tmp/DPI_2/DPI_2.ino
+arduino-cli compile --fqbn esp32:esp32:esp32 /tmp/DPI_2
 ```
 
 ## Source Structure
@@ -88,7 +91,8 @@ docs/hardware-wiring.md             Wiring map and bring-up checklist
 ## Notes
 
 - The physical LED strip is mapped in reverse order because the installed strip direction is opposite the UI order.
+- Empty NFC slots keep one tiny center idle dot per layer; LED brightness is capped in firmware to reduce USB/power-rail instability.
 - The app does not need a backend.
 - Web Serial requires a Chromium-based browser.
-- If flashing fails, disconnect the app from ESP32 and retry. If boot/flashing is still flaky, unplug NeoPixel DIN from GPIO12/P12 during upload, or add a 10k pulldown from P12 to GND.
+- If flashing fails, disconnect the app from ESP32 and retry. NeoPixel DIN now uses GPIO22/P22 instead of the boot-strapping GPIO12/P12 pin.
 - If NTAG215 recognition is flaky, use a stronger shared 3.3V supply for the PN532 boards, common ground, short SPI wiring, antenna spacing, and a 470uF capacitor on the reader power rail.

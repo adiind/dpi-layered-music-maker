@@ -240,7 +240,8 @@ const App = () => {
   }, [isPlaying]);
 
   const sendLayerVolumeToHardware = useCallback((layerId: LayerId, volume: number, muted = mutesRef.current[layerId]) => {
-    void hardwareAdapterRef.current?.setLayerVolume(layerId, muted ? 0 : volume);
+    const hardwareVolume = muted ? 0 : volume;
+    void hardwareAdapterRef.current?.setLayerVolume(layerId, hardwareVolume);
   }, []);
 
   const syncHardwareVolumes = useCallback(() => {
@@ -625,6 +626,7 @@ const App = () => {
 
       const nowLabel = formatNow();
       const readerStartMatch = line.match(/^PN532\s+(tag-[1-5])\s+(.+?):\s+trying/i);
+      const readerStatusMatch = line.match(/^READER_(READY|MISSING):\s*(tag-[1-5])\s*:\s*([a-z0-9-]+)\s*:\s*(.+)\s*$/i);
       const tagReadMatch = line.match(/^TAG:\s*(tag-[1-5])\s*:?\s*([0-9a-fA-F:\-\s]*)/i);
       const tagPresentMatch = line.match(/^TAG_PRESENT:\s*(tag-[1-5])\s*:\s*([0-9a-fA-F:\-\s]+)\s*$/i);
       const tagRemovedMatch = line.match(/^TAG_REMOVED:\s*(tag-[1-5])\s*$/i);
@@ -683,7 +685,7 @@ const App = () => {
 
       if (volumeEvent) {
         resetEncoderVolumeFallback(volumeEvent.layerId);
-        applyLayerVolume(volumeEvent.layerId, volumeEvent.volume);
+        applyLayerVolume(volumeEvent.layerId, volumeEvent.volume, `${Math.round(volumeEvent.volume * 100)}% from encoder`);
       } else if (muteEvent) {
         resetEncoderMuteFallback(muteEvent.layerId);
         applyLayerMute(muteEvent.layerId, muteEvent.muted);
@@ -724,6 +726,27 @@ const App = () => {
             }
           }, ENCODER_FALLBACK_DELAY_MS),
         };
+      } else if (readerStatusMatch) {
+        const statusKind = readerStatusMatch[1].toUpperCase();
+        const tagId = readerStatusMatch[2].toLowerCase();
+        const layerId = readerStatusMatch[3].toLowerCase();
+        const detail = readerStatusMatch[4];
+
+        if (isNfcTagId(tagId)) {
+          updateReaderStatus(tagId, {
+            state: statusKind === "READY" ? "detected" : "missing",
+            title: `${getReaderLabel(tagId)} ${statusKind === "READY" ? "ready" : "missing"}`,
+            detail: `${getLayer(layerId as LayerId)?.name ?? layerId} reader ${detail}`,
+            atLabel: nowLabel,
+          });
+          setHardwareActivity({
+            kind: "serial",
+            title: statusKind === "READY" ? "Reader ready" : "Reader missing",
+            detail: `${getReaderLabel(tagId)} ${detail}`,
+            tagId,
+            atLabel: nowLabel,
+          });
+        }
       } else if (readerStartMatch) {
         const tagId = readerStartMatch[1].toLowerCase();
         if (isNfcTagId(tagId)) {

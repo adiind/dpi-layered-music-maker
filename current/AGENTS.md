@@ -1,6 +1,18 @@
 ## Codex
-- Saved the confirmed working flashed firmware snapshot from commit c400742 and current NFC Studio UI fixes to GitHub.
+- Moved encoder direction correction fully into firmware for all layers and removed browser-side volume inversion; build/lint/compile passed but flashing is waiting for the ESP32 USB serial port.
+- Flashed the CS-first NFC recovery firmware and verified the new boot line, but all five PN532 readers still reported no response.
+- Moved PN532 CS pins to OUTPUT+HIGH before NeoPixel startup for NFC recovery.
+- Reflashed the current low-power NeoPixel idle-dot firmware at 115200 upload speed and confirmed the GPIO22 boot banner.
+- Flashed the low-power NeoPixel idle-dot firmware at 115200 upload speed after the default fast upload hit serial noise.
+- Added a low-power NeoPixel idle-dot mode with dim boot self-test and a frame current cap.
+- Flashed the ESP32 on `/dev/cu.usbserial-0001` with NeoPixel DIN on GPIO22 and Solo encoder SW disabled, then verified the boot serial line.
+- Verified the pasted hardware-volume review: inverted-layer mute drift is real, first-turn seed mismatch is possible, and build/lint still pass.
+- Moved NeoPixel DIN from GPIO12 to the Solo encoder SW pin on GPIO22 and disabled only that physical Solo button while keeping Solo rotation.
+- Compared the new GitHub LED safety branch against the stable snapshot and verified frontend build plus ESP32 compile without flashing.
+- Added a frontend-only hardware volume direction flip for layers 2-4 so the UI/audio compensate without reflashing ESP32 firmware.
+- Rebuilt local firmware as stable NFC baseline plus only safe encoder direction and queued NeoPixel render fixes, without flashing it over the rollback.
 - Rolled ESP32 firmware back to the known-stable NFC snapshot from commit c400742 after experimental LED/NFC flashes broke reader recognition.
+- Added ESP32 reader-ready/missing heartbeats and restored NFC polling to a steadier middle ground while keeping the LED render fix.
 - Removed the saved-UID option shortcut so raw NFC heartbeats cannot fight card payloads between options like Keys 1 and 3.
 - Let NFC Studio apply saved same-slot UID assignments immediately while waiting for slower DPI payload verification.
 - Stopped raw NFC UID heartbeats from overwriting a known DPI card payload in the NFC Studio reader status.
